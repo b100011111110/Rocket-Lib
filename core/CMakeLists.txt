@@ -14,10 +14,10 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(pybind11)
 
 # Build the Python extension module
-pybind11_add_module(rocket core/src/rocket.cpp core/src/tensor.cpp)
+pybind11_add_module(rocket src/rocket.cpp src/tensor.cpp)
 
 # Include directories for definitions
-target_include_directories(rocket PRIVATE core/include)
+target_include_directories(rocket PRIVATE include)
 
 # Optional: set output directory to build so testing can easily find it
 set_target_properties(rocket PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
