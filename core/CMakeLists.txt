@@ -17,7 +17,8 @@ FetchContent_MakeAvailable(pybind11)
 pybind11_add_module(rocket src/rocket.cpp 
                     src/tensor.cpp 
                     src/activation.cpp 
-                    src/layer.cpp)
+                    src/layer.cpp
+                    src/loss.cpp)
 
 # Include directories for definitions
 target_include_directories(rocket PRIVATE include)
