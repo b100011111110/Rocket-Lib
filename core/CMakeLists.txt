@@ -14,7 +14,10 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(pybind11)
 
 # Build the Python extension module
-pybind11_add_module(rocket src/rocket.cpp src/tensor.cpp src/activation.cpp)
+pybind11_add_module(rocket src/rocket.cpp 
+                    src/tensor.cpp 
+                    src/activation.cpp 
+                    src/layer.cpp)
 
 # Include directories for definitions
 target_include_directories(rocket PRIVATE include)
