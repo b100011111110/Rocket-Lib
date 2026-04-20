@@ -1,6 +1,7 @@
 import os
 import random
 import sys
+import time
 
 import numpy as np
 
@@ -222,7 +223,10 @@ def main():
         f"(batch_size={batch_size}, lr={rocket_lr}) ---"
     )
     set_dropout_mode(rocket_dropout_layers, True)
+    start_time = time.time()
     r_model.train(x_train_rt, y_train_rt, x_test_rt, y_test_rt, epochs, batch_size)
+    rocket_time = time.time() - start_time
+    print(f"Rocket training took {rocket_time:.2f} seconds.")
 
     print("\n--- Evaluating Rocket model ---")
     set_dropout_mode(rocket_dropout_layers, False)
@@ -249,7 +253,10 @@ def main():
         f"\n--- Training Keras model for {epochs} epochs "
         f"(batch_size={batch_size}, lr={keras_lr}) ---"
     )
+    start_time = time.time()
     k_model.fit(X_train, y_train, epochs=epochs, verbose=0, batch_size=batch_size)
+    keras_time = time.time() - start_time
+    print(f"Keras training took {keras_time:.2f} seconds.")
 
     k_eval = k_model.evaluate(X_test, y_test, verbose=0)
     k_bce = float(k_eval[0])
@@ -277,6 +284,7 @@ def main():
     print(f"Rocket Recall: {r_metrics['recall']:.4f} | Keras Recall: {k_recall:.4f}")
     print(f"Rocket F1: {r_metrics['f1']:.4f} | Keras F1: {k_metrics['f1']:.4f}")
     print(f"Rocket AUC: {r_metrics['auc']:.4f} | Keras AUC: {k_auc:.4f}")
+    print(f"Rocket Time: {rocket_time:.2f}s | Keras Time: {keras_time:.2f}s")
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 #include "model.h"
 #include <algorithm>
+#include <chrono>
 #include <iostream>
 #include <queue>
 #include <random>
@@ -116,6 +117,7 @@ void Model::train(const std::vector<Tensor> &xtrain,
   std::mt19937 gen(seed);
 
   for (int epoch = 0; epoch < epochs; ++epoch) {
+    auto epoch_start = std::chrono::high_resolution_clock::now();
     double total_loss = 0.0;
 
     // Shuffle indices at the start of each epoch if enabled
@@ -217,9 +219,16 @@ void Model::train(const std::vector<Tensor> &xtrain,
 
         layer->update(optimizer);
       }
+      if (optimizer) {
+        optimizer->begin_step();
+      }
     }
+    auto epoch_end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> epoch_duration = epoch_end - epoch_start;
+
     std::cout << "Epoch " << epoch + 1 << "/" << epochs
-              << " - Loss: " << (total_loss / xtrain.size()) << std::endl;
+              << " - Loss: " << (total_loss / xtrain.size())
+              << " - Time: " << epoch_duration.count() << "s" << std::endl;
   }
 }
 
