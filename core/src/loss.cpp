@@ -105,7 +105,7 @@ double BCE::forward(const Tensor &y_pred, const Tensor &y_true) {
   }
   double sum = 0.0;
   int size = y_pred.rows * y_pred.cols;
-  const double epsilon = 1e-15;
+  const double epsilon = 1e-7;
   for (int i = 0; i < size; ++i) {
     double p = std::max(epsilon, std::min(1.0 - epsilon, y_pred.data[i]));
     double t = y_true.data[i];
@@ -122,11 +122,43 @@ Tensor BCE::backward(const Tensor &y_pred, const Tensor &y_true) {
   int cols = y_pred.cols;
   int size = rows * cols;
   Tensor grad(rows, cols);
-  const double epsilon = 1e-15;
+  const double epsilon = 1e-7;
   for (int i = 0; i < size; ++i) {
     double p = std::max(epsilon, std::min(1.0 - epsilon, y_pred.data[i]));
     double t = y_true.data[i];
-    grad.data[i] = (-(t / p) + (1.0 - t) / (1.0 - p)) / size;
+    if (y_pred.data[i] <= epsilon || y_pred.data[i] >= 1.0 - epsilon) {
+      grad.data[i] = 0.0;
+    } else {
+      grad.data[i] = (-(t / p) + (1.0 - t) / (1.0 - p)) / size;
+    }
+  }
+  return grad;
+}
+
+double BCEWithLogits::forward(const Tensor &logits, const Tensor &y_true) {
+  if (logits.rows != y_true.rows || logits.cols != y_true.cols) {
+    throw std::invalid_argument("BCEWithLogits: Dimensions mismatch");
+  }
+  double sum = 0.0;
+  int size = logits.rows * logits.cols;
+  for (int i = 0; i < size; ++i) {
+    double x = logits.data[i];
+    double t = y_true.data[i];
+    sum += std::max(x, 0.0) - x * t + std::log(1.0 + std::exp(-std::abs(x)));
+  }
+  return sum / size;
+}
+
+Tensor BCEWithLogits::backward(const Tensor &logits, const Tensor &y_true) {
+  if (logits.rows != y_true.rows || logits.cols != y_true.cols) {
+    throw std::invalid_argument("BCEWithLogits: Dimensions mismatch");
+  }
+  int size = logits.rows * logits.cols;
+  Tensor grad(logits.rows, logits.cols);
+  for (int i = 0; i < size; ++i) {
+    double p = 1.0 / (1.0 + std::exp(-logits.data[i]));
+    double t = y_true.data[i];
+    grad.data[i] = (p - t) / size;
   }
   return grad;
 }

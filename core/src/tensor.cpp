@@ -18,8 +18,7 @@ Tensor::Tensor(int r, int c) : rows(r), cols(c), owns_memory(true) {
   // For Xavier Initialization, variance is 2.0 / (fan_in + fan_out)
   double limit = std::sqrt(6.0 / (rows + cols)); // Uniform Xavier
 
-  std::random_device rd;
-  std::mt19937 gen(rd());
+  static std::mt19937 gen(42);
   std::uniform_real_distribution<> dis(-limit, limit);
 
   for (int i = 0; i < r * c; ++i) {

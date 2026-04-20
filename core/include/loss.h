@@ -41,6 +41,12 @@ public:
   Tensor backward(const Tensor &y_pred, const Tensor &y_true) override;
 };
 
+class BCEWithLogits : public Loss {
+public:
+  double forward(const Tensor &logits, const Tensor &y_true) override;
+  Tensor backward(const Tensor &logits, const Tensor &y_true) override;
+};
+
 class CCE : public Loss {
 public:
   double forward(const Tensor &y_pred, const Tensor &y_true) override;

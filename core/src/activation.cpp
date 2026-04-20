@@ -65,8 +65,10 @@ Tensor Sigmoid::forward(const Tensor &input) {
 
 Tensor Sigmoid::backward(const Tensor &input, const Tensor &grad_output) {
   Tensor grad_input(input.rows, input.cols);
+  const double epsilon = 1e-7;
   for (int i = 0; i < input.rows * input.cols; ++i) {
     double s = 1.0 / (1.0 + std::exp(-input.data[i]));
+    s = std::max(epsilon, std::min(1.0 - epsilon, s));
     grad_input.data[i] = grad_output.data[i] * s * (1.0 - s);
   }
   return grad_input;

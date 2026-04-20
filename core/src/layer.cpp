@@ -1,4 +1,6 @@
 #include "layer.h"
+#include "activation.h"
+#include "optimizer.h"
 #include <algorithm>
 #include <cmath>
 #include <random>
@@ -31,7 +33,15 @@ DenseLayer::DenseLayer(int input_dim, int output_dim) {
     biases.data[i] = 0.0;
     grad_biases.data[i] = 0.0;
   }
+
+  // Glorot/Xavier Uniform Initialization
+  double limit = std::sqrt(6.0 / (input_dim + output_dim));
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_real_distribution<> dis(-limit, limit);
+
   for (int i = 0; i < input_dim * output_dim; ++i) {
+    weights.data[i] = dis(gen);
     grad_weights.data[i] = 0.0;
   }
 }
@@ -90,6 +100,13 @@ const Tensor &DenseLayer::backward(const Tensor &input,
   return grad_input;
 }
 
+void DenseLayer::update(Optimizer *opt) {
+  if (opt) {
+    opt->update(weights, grad_weights);
+    opt->update(biases, grad_biases);
+  }
+}
+
 DropoutLayer::DropoutLayer(double rate)
     : rate(std::max(0.0, std::min(1.0, rate))), is_training(true) {}
 
@@ -108,12 +125,16 @@ const Tensor &DropoutLayer::forward(const Tensor &input) {
   }
 
   double scale = 1.0 / (1.0 - rate);
-  std::random_device rd;
-  std::mt19937 gen(rd());
+
+  static std::mt19937 gen([]() {
+    const char *seed_str = std::getenv("ROCKET_SEED");
+    return seed_str ? std::stoul(seed_str) : 42;
+  }());
   std::uniform_real_distribution<> dis(0.0, 1.0);
 
   for (int i = 0; i < input.rows * input.cols; ++i) {
-    if (dis(gen) > rate) {
+    double rand_val = dis(gen);
+    if (rand_val > rate) {
       mask.data[i] = 1.0;
       output.data[i] = input.data[i] * scale;
     } else {
@@ -162,9 +183,28 @@ const Tensor &RegularizationLayer::backward(const Tensor &input,
           lambda *
           ((input.data[i] > 0) ? 1.0 : ((input.data[i] < 0) ? -1.0 : 0.0));
     } else if (type == 2) {
-      penalty = lambda * input.data[i];
+      penalty = 2.0 * lambda * input.data[i] / grad_output.rows;
     }
     grad_input.data[i] = grad_output.data[i] + penalty;
   }
+  return grad_input;
+}
+
+ActivationLayer::ActivationLayer(Activation *fn) : activation_fn(fn) {}
+
+ActivationLayer::~ActivationLayer() {
+  // Pybind11 manages the Python-created Activation object memory
+}
+
+const Tensor &ActivationLayer::forward(const Tensor &input) {
+  ensure_output_dims(input.rows, input.cols);
+  output = activation_fn->forward(input);
+  return output;
+}
+
+const Tensor &ActivationLayer::backward(const Tensor &input,
+                                        const Tensor &grad_output) {
+  ensure_grad_input_dims(input.rows, input.cols);
+  grad_input = activation_fn->backward(input, grad_output);
   return grad_input;
 }
