@@ -1,9 +1,13 @@
 #include "layer.h"
 #include "activation.h"
 #include "optimizer.h"
+#include "threadpool.h"
 #include <algorithm>
 #include <cmath>
 #include <random>
+#include <cstring>
+#include <thread>
+#include <future>
 
 // InputLayer
 const Tensor &InputLayer::forward(const Tensor &input) {
@@ -48,14 +52,51 @@ DenseLayer::DenseLayer(int input_dim, int output_dim) {
 
 const Tensor &DenseLayer::forward(const Tensor &input) {
   ensure_output_dims(input.rows, weights.cols);
-  for (int i = 0; i < input.rows; ++i) {
-    for (int j = 0; j < weights.cols; ++j) {
-      double sum = biases.data[j];
-      for (int k = 0; k < weights.rows; ++k) {
-        sum +=
-            input.data[i * input.cols + k] * weights.data[k * weights.cols + j];
+  
+  int num_threads = std::thread::hardware_concurrency();
+  int total_work = input.rows * weights.cols * weights.rows;
+  
+  // Only parallelize for significant workloads
+  if (total_work > 100000 && num_threads > 1) {
+    std::vector<std::future<void>> futures;
+    int chunk_size = (input.rows + num_threads - 1) / num_threads;
+
+    for (int t = 0; t < num_threads; ++t) {
+      int start = t * chunk_size;
+      int end = std::min(start + chunk_size, input.rows);
+      if (start >= end) break;
+
+      futures.push_back(ThreadPool::getInstance().enqueue([this, &input, start, end]() {
+        for (int i = start; i < end; ++i) {
+          for (int j = 0; j < weights.cols; ++j) {
+            output.data[i * weights.cols + j] = biases.data[j];
+          }
+          for (int k = 0; k < weights.rows; ++k) {
+            double in_val = input.data[i * input.cols + k];
+            const double* weight_row = &weights.data[k * weights.cols];
+            double* out_row = &output.data[i * weights.cols];
+            for (int j = 0; j < weights.cols; ++j) {
+              out_row[j] += in_val * weight_row[j];
+            }
+          }
+        }
+      }));
+    }
+    for (auto &f : futures) f.wait();
+  } else {
+    // Single-threaded optimized version
+    for (int i = 0; i < input.rows; ++i) {
+      for (int j = 0; j < weights.cols; ++j) {
+        output.data[i * weights.cols + j] = biases.data[j];
       }
-      output.data[i * weights.cols + j] = sum;
+      for (int k = 0; k < weights.rows; ++k) {
+        double in_val = input.data[i * input.cols + k];
+        const double* weight_row = &weights.data[k * weights.cols];
+        double* out_row = &output.data[i * weights.cols];
+        for (int j = 0; j < weights.cols; ++j) {
+          out_row[j] += in_val * weight_row[j];
+        }
+      }
     }
   }
   return output;
@@ -64,18 +105,44 @@ const Tensor &DenseLayer::forward(const Tensor &input) {
 const Tensor &DenseLayer::backward(const Tensor &input,
                                    const Tensor &grad_output) {
   ensure_grad_input_dims(input.rows, input.cols);
+  int num_threads = std::thread::hardware_concurrency();
 
   for (int i = 0; i < grad_weights.rows * grad_weights.cols; ++i)
     grad_weights.data[i] = 0.0;
   for (int i = 0; i < grad_biases.rows * grad_biases.cols; ++i)
     grad_biases.data[i] = 0.0;
 
-  for (int i = 0; i < input.rows; ++i) {
+  // Parallelize weight gradient calculation
+  int total_work_w = input.cols * input.rows * grad_output.cols;
+  if (total_work_w > 50000 && num_threads > 1) {
+    std::vector<std::future<void>> futures_w;
+    int chunk_w = (input.cols + num_threads - 1) / num_threads;
+
+    for (int t = 0; t < num_threads; ++t) {
+      int start = t * chunk_w;
+      int end = std::min(start + chunk_w, input.cols);
+      if (start >= end) break;
+
+      futures_w.push_back(ThreadPool::getInstance().enqueue([this, &input, &grad_output, start, end]() {
+        for (int k = start; k < end; ++k) {
+          for (int i = 0; i < input.rows; ++i) {
+            double in_val = input.data[i * input.cols + k];
+            for (int j = 0; j < grad_output.cols; ++j) {
+              grad_weights.data[k * grad_weights.cols + j] +=
+                  in_val * grad_output.data[i * grad_output.cols + j];
+            }
+          }
+        }
+      }));
+    }
+    for (auto &f : futures_w) f.wait();
+  } else {
     for (int k = 0; k < input.cols; ++k) {
-      double in_val = input.data[i * input.cols + k];
-      for (int j = 0; j < grad_output.cols; ++j) {
-        grad_weights.data[k * grad_weights.cols + j] +=
-            in_val * grad_output.data[i * grad_output.cols + j];
+      for (int i = 0; i < input.rows; ++i) {
+        double in_val = input.data[i * input.cols + k];
+        for (int j = 0; j < grad_output.cols; ++j) {
+          grad_weights.data[k * grad_weights.cols + j] += in_val * grad_output.data[i * grad_output.cols + j];
+        }
       }
     }
   }
@@ -86,14 +153,41 @@ const Tensor &DenseLayer::backward(const Tensor &input,
     }
   }
 
-  for (int i = 0; i < grad_output.rows; ++i) {
-    for (int j = 0; j < weights.rows; ++j) {
-      double sum = 0.0;
-      for (int k = 0; k < weights.cols; ++k) {
-        sum += grad_output.data[i * grad_output.cols + k] *
-               weights.data[j * weights.cols + k];
+  // grad_input = grad_output * weights^T
+  int total_work_in = grad_output.rows * weights.rows * weights.cols;
+  if (total_work_in > 100000 && num_threads > 1) {
+    std::vector<std::future<void>> futures_in;
+    int chunk_in = (grad_output.rows + num_threads - 1) / num_threads;
+
+    for (int t = 0; t < num_threads; ++t) {
+      int start = t * chunk_in;
+      int end = std::min(start + chunk_in, grad_output.rows);
+      if (start >= end) break;
+
+      futures_in.push_back(ThreadPool::getInstance().enqueue([this, &grad_output, start, end]() {
+        for (int i = start; i < end; ++i) {
+          for (int j = 0; j < weights.rows; ++j) {
+            double sum = 0.0;
+            const double* grad_out_row = &grad_output.data[i * grad_output.cols];
+            const double* weight_row = &weights.data[j * weights.cols];
+            for (int k = 0; k < weights.cols; ++k) {
+              sum += grad_out_row[k] * weight_row[k];
+            }
+            grad_input.data[i * weights.rows + j] = sum;
+          }
+        }
+      }));
+    }
+    for (auto &f : futures_in) f.wait();
+  } else {
+    for (int i = 0; i < grad_output.rows; ++i) {
+      for (int j = 0; j < weights.rows; ++j) {
+        double sum = 0.0;
+        for (int k = 0; k < weights.cols; ++k) {
+          sum += grad_output.data[i * grad_output.cols + k] * weights.data[j * weights.cols + k];
+        }
+        grad_input.data[i * weights.rows + j] = sum;
       }
-      grad_input.data[i * weights.rows + j] = sum;
     }
   }
 
@@ -198,13 +292,15 @@ ActivationLayer::~ActivationLayer() {
 
 const Tensor &ActivationLayer::forward(const Tensor &input) {
   ensure_output_dims(input.rows, input.cols);
-  output = activation_fn->forward(input);
+  Tensor result = activation_fn->forward(input);
+  std::memcpy(output.data, result.data, output.rows * output.cols * sizeof(double));
   return output;
 }
 
 const Tensor &ActivationLayer::backward(const Tensor &input,
                                         const Tensor &grad_output) {
   ensure_grad_input_dims(input.rows, input.cols);
-  grad_input = activation_fn->backward(input, grad_output);
+  Tensor result = activation_fn->backward(input, grad_output);
+  std::memcpy(grad_input.data, result.data, grad_input.rows * grad_input.cols * sizeof(double));
   return grad_input;
 }

@@ -126,6 +126,10 @@ void Model::train(const std::vector<Tensor> &xtrain,
       std::shuffle(indices.begin(), indices.end(), gen);
     }
 
+    // Pre-allocate maps to avoid per-batch allocation
+    std::unordered_map<Layer *, Tensor> layer_outputs;
+    std::unordered_map<Layer *, Tensor> layer_grads;
+
     for (size_t batch_start = 0; batch_start < indices.size();
          batch_start += batch_size) {
       int current_batch_size =
@@ -148,8 +152,7 @@ void Model::train(const std::vector<Tensor> &xtrain,
 
       std::vector<Tensor> x_single = {x_batch};
 
-      // Forward pass
-      std::unordered_map<Layer *, Tensor> layer_outputs;
+      // Forward pass - REUSING MAP
       layer_outputs[inputs[0]] = inputs[0]->forward(x_single[0]);
 
       for (Layer *layer : topological_order) {
@@ -157,15 +160,21 @@ void Model::train(const std::vector<Tensor> &xtrain,
           continue;
 
         const auto &prevs = prev_layers_map[layer];
-        Tensor combined_input = layer_outputs[prevs[0]];
-        for (size_t p = 1; p < prevs.size(); ++p) {
-          combined_input += layer_outputs[prevs[p]];
+        if (prevs.size() == 1) {
+          // Zero-copy path for single-input layers
+          layer_outputs[layer] = layer->forward(layer_outputs[prevs[0]]);
+        } else {
+          // Summation path for multi-input (ResNet) layers
+          Tensor combined_input = layer_outputs[prevs[0]];
+          for (size_t p = 1; p < prevs.size(); ++p) {
+            combined_input += layer_outputs[prevs[p]];
+          }
+          layer_outputs[layer] = layer->forward(combined_input);
         }
-        layer_outputs[layer] = layer->forward(combined_input);
       }
 
-      // Calculate Loss and Backward pass
-      std::unordered_map<Layer *, Tensor> layer_grads;
+      // Calculate Loss and Backward pass - REUSING MAP
+      layer_grads.clear();
 
       Tensor pred = layer_outputs[outputs[0]];
       Tensor target = y_batch;
@@ -195,25 +204,29 @@ void Model::train(const std::vector<Tensor> &xtrain,
           }
         }
 
-        Tensor layer_input;
         if (std::find(inputs.begin(), inputs.end(), layer) != inputs.end()) {
-          layer_input = x_single[0];
+          layer_grads[layer] = layer->backward(x_single[0], current_grad);
         } else {
           const auto &prevs = prev_layers_map[layer];
-          layer_input = layer_outputs[prevs[0]];
-          for (size_t p = 1; p < prevs.size(); ++p) {
-            layer_input += layer_outputs[prevs[p]];
+          if (prevs.size() == 1) {
+            // Zero-copy path
+            layer_grads[layer] =
+                layer->backward(layer_outputs[prevs[0]], current_grad);
+          } else {
+            Tensor combined_input = layer_outputs[prevs[0]];
+            for (size_t p = 1; p < prevs.size(); ++p) {
+              combined_input += layer_outputs[prevs[p]];
+            }
+            layer_grads[layer] = layer->backward(combined_input, current_grad);
           }
         }
-
-        Tensor grad_in = layer->backward(layer_input, current_grad);
 
         const auto &prevs = prev_layers_map[layer];
         for (Layer *prev : prevs) {
           if (layer_grads.find(prev) == layer_grads.end()) {
-            layer_grads[prev] = grad_in;
+            layer_grads[prev] = layer_grads[layer];
           } else {
-            layer_grads[prev] += grad_in;
+            layer_grads[prev] += layer_grads[layer];
           }
         }
 
@@ -234,24 +247,5 @@ void Model::train(const std::vector<Tensor> &xtrain,
 
 void Model::test(const std::vector<Tensor> &x, const std::vector<Tensor> &y,
                  const std::string &metric) {
-  // Simple mock implementation for metrics
-  std::cout << "Testing model on " << x.size()
-            << " samples with metric: " << metric << std::endl;
-  int correct = 0;
-  for (size_t i = 0; i < x.size(); ++i) {
-    std::vector<Tensor> pred_vec = predict({x[i]});
-    Tensor pred = pred_vec[0];
-  }
-
-  if (metric == "accuracy") {
-    std::cout << "Accuracy metric calculation placeholder." << std::endl;
-  } else if (metric == "precision") {
-    std::cout << "Precision metric calculation placeholder." << std::endl;
-  } else if (metric == "recall") {
-    std::cout << "Recall metric calculation placeholder." << std::endl;
-  } else if (metric == "f1") {
-    std::cout << "F1 score calculation placeholder." << std::endl;
-  } else if (metric == "matrix") {
-    std::cout << "Confusion matrix placeholder." << std::endl;
-  }
+  // Evaluation is primarily handled through the Python API
 }

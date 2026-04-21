@@ -92,7 +92,7 @@ def evaluate_binary_predictions(y_true, probs, threshold=0.5):
 
 def main():
     input_dim = int(os.getenv("ROCKET_INPUT_DIM", "16"))
-    epochs = int(os.getenv("ROCKET_EPOCHS", "120"))
+    epochs = int(os.getenv("ROCKET_EPOCHS", "500"))
     rocket_lr = float(os.getenv("ROCKET_LR", "0.01"))
     keras_lr = float(os.getenv("KERAS_LR", str(rocket_lr)))
     dropout_rate = float(os.getenv("ROCKET_DROPOUT", "0.15"))
