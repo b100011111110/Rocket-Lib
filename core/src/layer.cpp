@@ -201,6 +201,16 @@ void DenseLayer::update(Optimizer *opt) {
   }
 }
 
+void DenseLayer::save(std::ostream& os) const {
+  weights.save(os);
+  biases.save(os);
+}
+
+void DenseLayer::load(std::istream& is) {
+  weights.load(is);
+  biases.load(is);
+}
+
 DropoutLayer::DropoutLayer(double rate)
     : rate(std::max(0.0, std::min(1.0, rate))), is_training(true) {}
 

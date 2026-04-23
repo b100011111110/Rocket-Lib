@@ -27,6 +27,8 @@ public:
   Tensor operator-() const; // Unary minus
 
   void print() const;
+  void save(std::ostream& os) const;
+  void load(std::istream& is);
 };
 
 #endif

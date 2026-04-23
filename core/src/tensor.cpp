@@ -125,3 +125,32 @@ void Tensor::print() const {
     std::cout << "\n";
   }
 }
+
+void Tensor::save(std::ostream& os) const {
+  os.write(reinterpret_cast<const char*>(&rows), sizeof(rows));
+  os.write(reinterpret_cast<const char*>(&cols), sizeof(cols));
+  if (rows > 0 && cols > 0 && data != nullptr) {
+    os.write(reinterpret_cast<const char*>(data), rows * cols * sizeof(double));
+  }
+}
+
+void Tensor::load(std::istream& is) {
+  int r, c;
+  is.read(reinterpret_cast<char*>(&r), sizeof(r));
+  is.read(reinterpret_cast<char*>(&c), sizeof(c));
+  
+  if (r != rows || c != cols) {
+      // If dimensions don't match and we own memory, reallocate
+      if (owns_memory) {
+          delete[] data;
+          rows = r;
+          cols = c;
+          data = new double[rows * cols];
+      } else {
+          throw std::runtime_error("Tensor dimension mismatch during load on non-owning tensor");
+      }
+  }
+  if (rows > 0 && cols > 0 && data != nullptr) {
+    is.read(reinterpret_cast<char*>(data), rows * cols * sizeof(double));
+  }
+}

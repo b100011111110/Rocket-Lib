@@ -32,6 +32,10 @@ public:
   int get_params_count() const override {
     PYBIND11_OVERRIDE(int, Layer, get_params_count);
   }
+  using DetailsMap = std::unordered_map<std::string, std::string>;
+  DetailsMap get_details() const override {
+    PYBIND11_OVERRIDE(DetailsMap, Layer, get_details);
+  }
 };
 
 // Trampoline class for Loss
@@ -151,7 +155,8 @@ PYBIND11_MODULE(rocket, m) {
   // Bind Model
   py::class_<Model>(m, "Model")
       .def(py::init<>())
-      .def("add", &Model::add, py::arg("layer"), py::arg("prev_layers"))
+      .def("add", &Model::add, py::arg("layer"), py::arg("prev_layers"),
+           py::keep_alive<1, 2>())
       .def("compile", &Model::compile, py::arg("loss"), py::arg("opt"),
            py::keep_alive<1, 2>(), py::keep_alive<1, 3>())
       .def("setInputOutputLayers", &Model::setInputOutputLayers,
@@ -161,5 +166,9 @@ PYBIND11_MODULE(rocket, m) {
            py::arg("batch_size") = 1)
       .def("predict", &Model::predict, py::arg("x"))
       .def("test", &Model::test, py::arg("x"), py::arg("y"), py::arg("metric"))
-      .def("summary", &Model::summary);
+      .def("summary", &Model::summary)
+      .def("details", &Model::details)
+      .def("weights", &Model::weights)
+      .def("save", &Model::save, py::arg("path"))
+      .def("load", &Model::load, py::arg("path"));
 }

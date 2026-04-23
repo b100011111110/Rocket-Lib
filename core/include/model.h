@@ -33,6 +33,10 @@ public:
                int epochs, int batch_size = 1);
     void test(const std::vector<Tensor>& x, const std::vector<Tensor>& y, const std::string& metric);
     void summary() const;
+    void details() const;
+    void weights() const;
+    void save(const std::string& path) const;
+    void load(const std::string& path);
 };
 
 #endif

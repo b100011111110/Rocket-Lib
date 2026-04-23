@@ -3,6 +3,7 @@
 #include <chrono>
 #include <iomanip>
 #include <iostream>
+#include <fstream>
 #include <queue>
 #include <random>
 
@@ -23,11 +24,6 @@ void Model::setInputOutputLayers(const std::vector<Layer *> &inputs,
                                  const std::vector<Layer *> &outputs) {
   this->inputs = inputs;
   this->outputs = outputs;
-}
-
-void Model::compile(Loss *loss, Optimizer *opt) {
-  this->loss_fn = loss;
-  this->optimizer = opt;
 
   // Topological sort using Kahn's algorithm
   std::unordered_map<Layer *, int> in_degree;
@@ -59,6 +55,11 @@ void Model::compile(Loss *loss, Optimizer *opt) {
       }
     }
   }
+}
+
+void Model::compile(Loss *loss, Optimizer *opt) {
+  this->loss_fn = loss;
+  this->optimizer = opt;
 }
 
 std::vector<Tensor> Model::predict(const std::vector<Tensor> &x) {
@@ -281,4 +282,118 @@ void Model::summary() const {
   std::cout << std::string(70, '=') << std::endl;
   std::cout << "Total params: " << total_params << std::endl;
   std::cout << std::string(70, '-') << std::endl << std::endl;
+}
+
+void Model::details() const {
+  std::cout << "\nModel Details (DAG Structure)" << std::endl;
+  std::cout << std::string(90, '-') << std::endl;
+  std::cout << std::left << std::setw(20) << "Layer" 
+            << std::setw(25) << "Predecessors" 
+            << std::setw(25) << "Successors" 
+            << std::setw(20) << "Configuration" << std::endl;
+  std::cout << std::string(90, '=') << std::endl;
+
+  for (Layer *layer : topological_order) {
+    std::string name = layer->get_name();
+    
+    // Get Predecessors
+    std::string preds = "";
+    auto it_p = prev_layers_map.find(layer);
+    if (it_p != prev_layers_map.end()) {
+      for (Layer* p : it_p->second) {
+        preds += p->get_name() + ",";
+      }
+      if (!preds.empty()) preds.pop_back();
+    }
+    if (preds == "") preds = "Input";
+
+    // Get Successors
+    std::string succs = "";
+    auto it_n = next_layers_map.find(layer);
+    if (it_n != next_layers_map.end()) {
+      for (Layer* n : it_n->second) {
+        succs += n->get_name() + ",";
+      }
+      if (!succs.empty()) succs.pop_back();
+    }
+    if (succs == "") succs = "Output";
+
+    // Get Configuration Details
+    std::string config = "";
+    auto details_map = layer->get_details();
+    for (auto const& pair : details_map) {
+      config += pair.first + ":" + pair.second + " ";
+    }
+
+    std::cout << std::left << std::setw(20) << name 
+              << std::setw(25) << (preds.length() > 23 ? preds.substr(0, 20) + "..." : preds)
+              << std::setw(25) << (succs.length() > 23 ? succs.substr(0, 20) + "..." : succs)
+              << std::setw(20) << config << std::endl;
+  }
+  std::cout << std::string(90, '-') << std::endl << std::endl;
+}
+
+void Model::weights() const {
+  std::cout << "\n--- Model Weights Registry ---" << std::endl;
+  for (Layer *layer : topological_order) {
+    if (layer->get_name() == "DenseLayer") {
+      DenseLayer* dl = static_cast<DenseLayer*>(layer);
+      std::cout << "\n[ " << dl->get_name() << " ]" << std::endl;
+      std::cout << "Weights Shape: (" << dl->weights.rows << ", " << dl->weights.cols << ")" << std::endl;
+      dl->weights.print();
+      std::cout << "Biases Shape: (1, " << dl->biases.cols << ")" << std::endl;
+      dl->biases.print();
+    }
+  }
+  std::cout << "\n------------------------------" << std::endl;
+}
+
+void Model::save(const std::string& path) const {
+    std::ofstream os(path, std::ios::binary);
+    if (!os) {
+        throw std::runtime_error("Could not open file for saving: " + path);
+    }
+    
+    // 1. Write Header/Version
+    uint32_t magic = 0x524F434B; // "ROCK"
+    os.write(reinterpret_cast<const char*>(&magic), sizeof(magic));
+    
+    // 2. Write number of layers
+    uint32_t num_layers = static_cast<uint32_t>(topological_order.size());
+    os.write(reinterpret_cast<const char*>(&num_layers), sizeof(num_layers));
+    
+    // 3. Save each layer
+    for (Layer* layer : topological_order) {
+        layer->save(os);
+    }
+    
+    os.close();
+}
+
+void Model::load(const std::string& path) {
+    std::ifstream is(path, std::ios::binary);
+    if (!is) {
+        throw std::runtime_error("Could not open file for loading: " + path);
+    }
+    
+    // 1. Check Header
+    uint32_t magic;
+    is.read(reinterpret_cast<char*>(&magic), sizeof(magic));
+    if (magic != 0x524F434B) {
+        throw std::runtime_error("Invalid model file format (Magic mismatch)");
+    }
+    
+    // 2. Check number of layers
+    uint32_t num_layers;
+    is.read(reinterpret_cast<char*>(&num_layers), sizeof(num_layers));
+    if (num_layers != topological_order.size()) {
+        throw std::runtime_error("Model architecture mismatch: number of layers doesn't match");
+    }
+    
+    // 3. Load each layer
+    for (Layer* layer : topological_order) {
+        layer->load(is);
+    }
+    
+    is.close();
 }

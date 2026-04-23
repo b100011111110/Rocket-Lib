@@ -3,6 +3,7 @@
 
 #include "tensor.h"
 #include <string>
+#include <unordered_map>
 
 class Optimizer;
 
@@ -32,6 +33,9 @@ public:
   virtual void update(Optimizer *opt) {}
   virtual std::string get_name() const = 0;
   virtual int get_params_count() const { return 0; }
+  virtual std::unordered_map<std::string, std::string> get_details() const { return {}; }
+  virtual void save(std::ostream& os) const {}
+  virtual void load(std::istream& is) {}
 };
 
 class InputLayer : public Layer {
@@ -58,6 +62,12 @@ public:
   int get_params_count() const override {
     return (weights.rows * weights.cols) + (biases.rows * biases.cols);
   }
+  std::unordered_map<std::string, std::string> get_details() const override {
+    return {{"input_dim", std::to_string(weights.rows)},
+            {"output_dim", std::to_string(weights.cols)}};
+  }
+  void save(std::ostream& os) const override;
+  void load(std::istream& is) override;
 };
 
 class DropoutLayer : public Layer {
@@ -72,6 +82,9 @@ public:
   const Tensor &backward(const Tensor &input,
                          const Tensor &grad_output) override;
   std::string get_name() const override { return "DropoutLayer"; }
+  std::unordered_map<std::string, std::string> get_details() const override {
+    return {{"rate", std::to_string(rate)}};
+  }
 };
 
 class RegularizationLayer : public Layer {
@@ -83,6 +96,10 @@ public:
   const Tensor &backward(const Tensor &input,
                          const Tensor &grad_output) override;
   std::string get_name() const override { return "RegularizationLayer"; }
+  std::unordered_map<std::string, std::string> get_details() const override {
+    return {{"lambda", std::to_string(lambda)},
+            {"type", (type == 1 ? "L1" : "L2")}};
+  }
 };
 
 class Activation;

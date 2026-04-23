@@ -27,9 +27,10 @@ add_library(rocket_core STATIC
 target_include_directories(rocket_core PUBLIC include)
 set_target_properties(rocket_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-# Build the Python extension module
+# Build the Python extension
 pybind11_add_module(rocket src/rocket.cpp)
 target_link_libraries(rocket PRIVATE rocket_core)
+
 
 
 # Optional: set output directory to build so testing can easily find it
