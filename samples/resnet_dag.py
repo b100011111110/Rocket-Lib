@@ -53,25 +53,9 @@ def main():
     # Finalize
     model.setInputOutputLayers([input_layer], [dense_out])
     model.compile(rocket.BCEWithLogits(), rocket.Adam(lr=0.005))
+    model.summary()
 
-    """
-    KERAS EQUIVALENT (Functional API):
-    ----------------------------------
-    import tensorflow as tf
-    inputs = tf.keras.Input(shape=(20,))
-    x = tf.keras.layers.Dense(64)(inputs)
-    x = tf.keras.layers.ReLU()(x)
-    
-    # Residual block
-    path_a = tf.keras.layers.Dense(64)(x)
-    path_b = x # Identity skip
-    
-    x = tf.keras.layers.Add()([path_a, path_b])
-    x = tf.keras.layers.ReLU()(x)
-    
-    outputs = tf.keras.layers.Dense(1)(x)
-    k_model = tf.keras.Model(inputs, outputs)
-    """
+
 
     # 4. Generate Data
     X = np.random.randn(1000, 20).astype(np.float32)
@@ -118,7 +102,6 @@ def main():
     except ImportError:
         print("\nTensorFlow not found. Skipping benchmark.")
 
-    # 7. Results Comparison
     print("\n" + "="*35)
     print(" RESNET PERFORMANCE & ACCURACY")
     print("="*35)

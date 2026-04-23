@@ -40,7 +40,7 @@ def main():
     # 4. Model Configuration
     model.setInputOutputLayers([layers["input"]], [layers["dense_out"]])
     model.compile(rocket.BCEWithLogits(), rocket.Adam(lr=0.001))
-
+    model.summary()
     # 5. Data Preparation
     X = np.random.randn(2000, 20).astype(np.float32)
     y = (np.sum(X[:, :10], axis=1) > 0).astype(np.float32).reshape(-1, 1)

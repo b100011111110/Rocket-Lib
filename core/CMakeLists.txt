@@ -16,17 +16,21 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(pybind11)
 
-# Build the Python extension module
-pybind11_add_module(rocket src/rocket.cpp 
-                    src/tensor.cpp 
-                    src/activation.cpp 
-                    src/layer.cpp
-                    src/loss.cpp
-                    src/model.cpp
-                    src/optimizer.cpp)
+# Core library for C++ usage
+add_library(rocket_core STATIC 
+            src/tensor.cpp 
+            src/activation.cpp 
+            src/layer.cpp
+            src/loss.cpp
+            src/model.cpp
+            src/optimizer.cpp)
+target_include_directories(rocket_core PUBLIC include)
+set_target_properties(rocket_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-# Include directories for definitions
-target_include_directories(rocket PRIVATE include)
+# Build the Python extension module
+pybind11_add_module(rocket src/rocket.cpp)
+target_link_libraries(rocket PRIVATE rocket_core)
+
 
 # Optional: set output directory to build so testing can easily find it
 set_target_properties(rocket PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})

@@ -2,6 +2,7 @@
 #define LAYER_H
 
 #include "tensor.h"
+#include <string>
 
 class Optimizer;
 
@@ -29,6 +30,8 @@ public:
   virtual const Tensor &backward(const Tensor &input,
                                  const Tensor &grad_output) = 0;
   virtual void update(Optimizer *opt) {}
+  virtual std::string get_name() const = 0;
+  virtual int get_params_count() const { return 0; }
 };
 
 class InputLayer : public Layer {
@@ -36,6 +39,7 @@ public:
   const Tensor &forward(const Tensor &input) override;
   const Tensor &backward(const Tensor &input,
                          const Tensor &grad_output) override;
+  std::string get_name() const override { return "InputLayer"; }
 };
 
 class DenseLayer : public Layer {
@@ -50,6 +54,10 @@ public:
   const Tensor &backward(const Tensor &input,
                          const Tensor &grad_output) override;
   void update(Optimizer *opt) override;
+  std::string get_name() const override { return "DenseLayer"; }
+  int get_params_count() const override {
+    return (weights.rows * weights.cols) + (biases.rows * biases.cols);
+  }
 };
 
 class DropoutLayer : public Layer {
@@ -63,6 +71,7 @@ public:
   const Tensor &forward(const Tensor &input) override;
   const Tensor &backward(const Tensor &input,
                          const Tensor &grad_output) override;
+  std::string get_name() const override { return "DropoutLayer"; }
 };
 
 class RegularizationLayer : public Layer {
@@ -73,6 +82,7 @@ public:
   const Tensor &forward(const Tensor &input) override;
   const Tensor &backward(const Tensor &input,
                          const Tensor &grad_output) override;
+  std::string get_name() const override { return "RegularizationLayer"; }
 };
 
 class Activation;
@@ -85,6 +95,7 @@ public:
   const Tensor &forward(const Tensor &input) override;
   const Tensor &backward(const Tensor &input,
                          const Tensor &grad_output) override;
+  std::string get_name() const override { return "ActivationLayer"; }
 };
 
 #endif

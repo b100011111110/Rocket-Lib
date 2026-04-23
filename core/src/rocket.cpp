@@ -26,6 +26,12 @@ public:
                          const Tensor &grad_output) override {
     PYBIND11_OVERRIDE_PURE(const Tensor &, Layer, backward, input, grad_output);
   }
+  std::string get_name() const override {
+    PYBIND11_OVERRIDE_PURE(std::string, Layer, get_name);
+  }
+  int get_params_count() const override {
+    PYBIND11_OVERRIDE(int, Layer, get_params_count);
+  }
 };
 
 // Trampoline class for Loss
@@ -154,5 +160,6 @@ PYBIND11_MODULE(rocket, m) {
            py::arg("xtest"), py::arg("ytest"), py::arg("epochs"),
            py::arg("batch_size") = 1)
       .def("predict", &Model::predict, py::arg("x"))
-      .def("test", &Model::test, py::arg("x"), py::arg("y"), py::arg("metric"));
+      .def("test", &Model::test, py::arg("x"), py::arg("y"), py::arg("metric"))
+      .def("summary", &Model::summary);
 }

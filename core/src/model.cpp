@@ -1,6 +1,7 @@
 #include "model.h"
 #include <algorithm>
 #include <chrono>
+#include <iomanip>
 #include <iostream>
 #include <queue>
 #include <random>
@@ -248,4 +249,36 @@ void Model::train(const std::vector<Tensor> &xtrain,
 void Model::test(const std::vector<Tensor> &x, const std::vector<Tensor> &y,
                  const std::string &metric) {
   // Evaluation is primarily handled through the Python API
+}
+
+void Model::summary() const {
+  std::cout << "\nModel Summary" << std::endl;
+  std::cout << std::string(70, '-') << std::endl;
+  std::cout << std::left << std::setw(25) << "Layer (type)" << std::setw(25)
+            << "Output Shape" << std::setw(15) << "Param #" << std::endl;
+  std::cout << std::string(70, '=') << std::endl;
+
+  int total_params = 0;
+  for (Layer *layer : topological_order) {
+    std::string name = layer->get_name();
+    std::string shape = "[batch, " + std::to_string(layer->output.cols) + "]";
+
+    if (name == "DenseLayer") {
+      shape = "[batch, " +
+              std::to_string(static_cast<DenseLayer *>(layer)->weights.cols) +
+              "]";
+    } else if (layer->output.cols == 0) {
+      shape = "[batch, ?]";
+    }
+
+    int params = layer->get_params_count();
+    total_params += params;
+
+    std::cout << std::left << std::setw(25) << name << std::setw(25) << shape
+              << std::setw(15) << params << std::endl;
+  }
+
+  std::cout << std::string(70, '=') << std::endl;
+  std::cout << "Total params: " << total_params << std::endl;
+  std::cout << std::string(70, '-') << std::endl << std::endl;
 }

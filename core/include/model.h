@@ -32,6 +32,7 @@ public:
                const std::vector<Tensor>& xtest, const std::vector<Tensor>& ytest, 
                int epochs, int batch_size = 1);
     void test(const std::vector<Tensor>& x, const std::vector<Tensor>& y, const std::string& metric);
+    void summary() const;
 };
 
 #endif

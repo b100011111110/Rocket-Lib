@@ -36,19 +36,8 @@ def main():
     # 3. Compile with Adam optimizer
     optimizer = rocket.Adam(lr=0.01)
     model.compile(rocket.BCEWithLogits(), optimizer)
+    model.summary()
 
-    """
-    KERAS EQUIVALENT:
-    -----------------
-    import tensorflow as tf
-    k_model = tf.keras.Sequential([
-        tf.keras.layers.Dense(64, input_shape=(20,)),
-        tf.keras.layers.ReLU(),
-        tf.keras.layers.Dense(1)
-    ])
-    k_model.compile(optimizer=tf.keras.optimizers.Adam(0.01), 
-                    loss=tf.keras.losses.BinaryCrossentropy(from_logits=True))
-    """
 
     # 4. Convert numpy to Rocket Tensors
     def to_rocket(arr):
