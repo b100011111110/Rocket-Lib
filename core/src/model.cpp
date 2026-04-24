@@ -6,6 +6,7 @@
 #include <fstream>
 #include <queue>
 #include <random>
+#include <cstring>
 
 Model::Model() : loss_fn(nullptr), optimizer(nullptr) {}
 
@@ -73,7 +74,6 @@ std::vector<Tensor> Model::predict(const std::vector<Tensor> &x) {
     if (std::find(inputs.begin(), inputs.end(), layer) != inputs.end())
       continue;
 
-    // Sum inputs from previous layers
     const auto &prevs = prev_layers_map[layer];
     if (prevs.empty())
       continue;
@@ -122,13 +122,11 @@ void Model::train(const std::vector<Tensor> &xtrain,
     auto epoch_start = std::chrono::high_resolution_clock::now();
     double total_loss = 0.0;
 
-    // Shuffle indices at the start of each epoch if enabled
     if (std::getenv("ROCKET_SHUFFLE") == nullptr ||
         std::string(std::getenv("ROCKET_SHUFFLE")) != "0") {
       std::shuffle(indices.begin(), indices.end(), gen);
     }
 
-    // Pre-allocate maps to avoid per-batch allocation
     std::unordered_map<Layer *, Tensor> layer_outputs;
     std::unordered_map<Layer *, Tensor> layer_grads;
 
@@ -136,25 +134,28 @@ void Model::train(const std::vector<Tensor> &xtrain,
          batch_start += batch_size) {
       int current_batch_size =
           std::min(batch_size, static_cast<int>(indices.size() - batch_start));
-      Tensor x_batch(current_batch_size, xtrain[0].cols);
-      Tensor y_batch(current_batch_size, ytrain[0].cols);
+      int seq_len = xtrain[0].rows;
+      int y_seq_len = ytrain[0].rows;
+      Tensor x_batch(current_batch_size * seq_len, xtrain[0].cols);
+      Tensor y_batch(current_batch_size * y_seq_len, ytrain[0].cols);
+      layer_outputs.clear();
+      layer_grads.clear();
 
       for (int batch_row = 0; batch_row < current_batch_size; ++batch_row) {
         int sample_idx = indices[batch_start + batch_row];
         const Tensor &x_sample = xtrain[sample_idx];
         const Tensor &y_sample = ytrain[sample_idx];
 
-        for (int col = 0; col < x_sample.cols; ++col) {
-          x_batch.data[batch_row * x_batch.cols + col] = x_sample.data[col];
-        }
-        for (int col = 0; col < y_sample.cols; ++col) {
-          y_batch.data[batch_row * y_batch.cols + col] = y_sample.data[col];
-        }
+        std::memcpy(&x_batch.data[batch_row * seq_len * x_sample.cols], 
+                    x_sample.data, 
+                    seq_len * x_sample.cols * sizeof(scalar));
+        std::memcpy(&y_batch.data[batch_row * y_seq_len * y_sample.cols], 
+                    y_sample.data, 
+                    y_seq_len * y_sample.cols * sizeof(scalar));
       }
 
       std::vector<Tensor> x_single = {x_batch};
 
-      // Forward pass - REUSING MAP
       layer_outputs[inputs[0]] = inputs[0]->forward(x_single[0]);
 
       for (Layer *layer : topological_order) {
@@ -162,20 +163,13 @@ void Model::train(const std::vector<Tensor> &xtrain,
           continue;
 
         const auto &prevs = prev_layers_map[layer];
-        if (prevs.size() == 1) {
-          // Zero-copy path for single-input layers
-          layer_outputs[layer] = layer->forward(layer_outputs[prevs[0]]);
-        } else {
-          // Summation path for multi-input (ResNet) layers
-          Tensor combined_input = layer_outputs[prevs[0]];
-          for (size_t p = 1; p < prevs.size(); ++p) {
-            combined_input += layer_outputs[prevs[p]];
-          }
-          layer_outputs[layer] = layer->forward(combined_input);
+        Tensor combined_input = layer_outputs[prevs[0]];
+        for (size_t p = 1; p < prevs.size(); ++p) {
+          combined_input += layer_outputs[prevs[p]];
         }
+        layer_outputs[layer] = layer->forward(combined_input);
       }
 
-      // Calculate Loss and Backward pass - REUSING MAP
       layer_grads.clear();
 
       Tensor pred = layer_outputs[outputs[0]];
@@ -211,7 +205,6 @@ void Model::train(const std::vector<Tensor> &xtrain,
         } else {
           const auto &prevs = prev_layers_map[layer];
           if (prevs.size() == 1) {
-            // Zero-copy path
             layer_grads[layer] =
                 layer->backward(layer_outputs[prevs[0]], current_grad);
           } else {
@@ -248,9 +241,7 @@ void Model::train(const std::vector<Tensor> &xtrain,
 }
 
 void Model::test(const std::vector<Tensor> &x, const std::vector<Tensor> &y,
-                 const std::string &metric) {
-  // Evaluation is primarily handled through the Python API
-}
+                 const std::string &metric) {}
 
 void Model::summary() const {
   std::cout << "\nModel Summary" << std::endl;
@@ -296,7 +287,6 @@ void Model::details() const {
   for (Layer *layer : topological_order) {
     std::string name = layer->get_name();
     
-    // Get Predecessors
     std::string preds = "";
     auto it_p = prev_layers_map.find(layer);
     if (it_p != prev_layers_map.end()) {
@@ -307,7 +297,6 @@ void Model::details() const {
     }
     if (preds == "") preds = "Input";
 
-    // Get Successors
     std::string succs = "";
     auto it_n = next_layers_map.find(layer);
     if (it_n != next_layers_map.end()) {
@@ -318,7 +307,6 @@ void Model::details() const {
     }
     if (succs == "") succs = "Output";
 
-    // Get Configuration Details
     std::string config = "";
     auto details_map = layer->get_details();
     for (auto const& pair : details_map) {
@@ -354,15 +342,12 @@ void Model::save(const std::string& path) const {
         throw std::runtime_error("Could not open file for saving: " + path);
     }
     
-    // 1. Write Header/Version
-    uint32_t magic = 0x524F434B; // "ROCK"
+    uint32_t magic = 0x524F434B;
     os.write(reinterpret_cast<const char*>(&magic), sizeof(magic));
-    
-    // 2. Write number of layers
+
     uint32_t num_layers = static_cast<uint32_t>(topological_order.size());
     os.write(reinterpret_cast<const char*>(&num_layers), sizeof(num_layers));
-    
-    // 3. Save each layer
+
     for (Layer* layer : topological_order) {
         layer->save(os);
     }
@@ -376,21 +361,18 @@ void Model::load(const std::string& path) {
         throw std::runtime_error("Could not open file for loading: " + path);
     }
     
-    // 1. Check Header
     uint32_t magic;
     is.read(reinterpret_cast<char*>(&magic), sizeof(magic));
     if (magic != 0x524F434B) {
         throw std::runtime_error("Invalid model file format (Magic mismatch)");
     }
-    
-    // 2. Check number of layers
+
     uint32_t num_layers;
     is.read(reinterpret_cast<char*>(&num_layers), sizeof(num_layers));
     if (num_layers != topological_order.size()) {
         throw std::runtime_error("Model architecture mismatch: number of layers doesn't match");
     }
-    
-    // 3. Load each layer
+
     for (Layer* layer : topological_order) {
         layer->load(is);
     }

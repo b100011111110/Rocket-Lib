@@ -32,6 +32,23 @@ public:
         return res;
     }
 
+    void parallel_for(int start, int end, std::function<void(int)> func) {
+        int total = end - start;
+        if (total <= 0) return;
+        int num_workers = workers.size();
+        int chunk = (total + num_workers - 1) / num_workers;
+        std::vector<std::future<void>> futures;
+        for (int i = 0; i < num_workers; ++i) {
+            int s = start + i * chunk;
+            int e = std::min(s + chunk, end);
+            if (s >= e) break;
+            futures.push_back(enqueue([s, e, func]() {
+                for (int j = s; j < e; ++j) func(j);
+            }));
+        }
+        for (auto &f : futures) f.wait();
+    }
+
     ~ThreadPool() {
         {
             std::unique_lock<std::mutex> lock(queue_mutex);

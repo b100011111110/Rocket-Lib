@@ -6,7 +6,7 @@
 class Loss {
 public:
   virtual ~Loss() = default;
-  virtual double forward(const Tensor &y_pred, const Tensor &y_true) = 0;
+  virtual scalar forward(const Tensor &y_pred, const Tensor &y_true) = 0;
   virtual Tensor backward(const Tensor &y_pred, const Tensor &y_true) = 0;
 };
 
@@ -15,41 +15,41 @@ public:
 
 class MSE : public Loss {
 public:
-  double forward(const Tensor &y_pred, const Tensor &y_true) override;
+  scalar forward(const Tensor &y_pred, const Tensor &y_true) override;
   Tensor backward(const Tensor &y_pred, const Tensor &y_true) override;
 };
 
 class MAE : public Loss {
 public:
-  double forward(const Tensor &y_pred, const Tensor &y_true) override;
+  scalar forward(const Tensor &y_pred, const Tensor &y_true) override;
   Tensor backward(const Tensor &y_pred, const Tensor &y_true) override;
 };
 
 class Huber : public Loss {
 private:
-  double delta;
+  scalar delta;
 
 public:
-  Huber(double delta = 1.0);
-  double forward(const Tensor &y_pred, const Tensor &y_true) override;
+  Huber(scalar delta = 1.0);
+  scalar forward(const Tensor &y_pred, const Tensor &y_true) override;
   Tensor backward(const Tensor &y_pred, const Tensor &y_true) override;
 };
 
 class BCE : public Loss {
 public:
-  double forward(const Tensor &y_pred, const Tensor &y_true) override;
+  scalar forward(const Tensor &y_pred, const Tensor &y_true) override;
   Tensor backward(const Tensor &y_pred, const Tensor &y_true) override;
 };
 
 class BCEWithLogits : public Loss {
 public:
-  double forward(const Tensor &logits, const Tensor &y_true) override;
+  scalar forward(const Tensor &logits, const Tensor &y_true) override;
   Tensor backward(const Tensor &logits, const Tensor &y_true) override;
 };
 
 class CCE : public Loss {
 public:
-  double forward(const Tensor &y_pred, const Tensor &y_true) override;
+  scalar forward(const Tensor &y_pred, const Tensor &y_true) override;
   Tensor backward(const Tensor &y_pred, const Tensor &y_true) override;
 };
 

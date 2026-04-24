@@ -14,38 +14,30 @@ public:
 
 class SGD : public Optimizer {
 public:
-  double learning_rate;
+  scalar learning_rate;
 
-  SGD(double lr = 0.01);
+  SGD(scalar lr = 0.01);
   void update(Tensor &param, const Tensor &grad) override;
 };
 
 class Adam : public Optimizer {
 public:
-  double learning_rate;
-  double beta1;
-  double beta2;
-  double epsilon;
+  scalar learning_rate, beta1, beta2, epsilon;
   int step_count;
+  std::unordered_map<int, Tensor> m;
+  std::unordered_map<int, Tensor> v;
 
-  std::unordered_map<double *, Tensor> m;
-  std::unordered_map<double *, Tensor> v;
-
-  Adam(double lr = 0.001, double b1 = 0.9, double b2 = 0.999,
-       double eps = 1e-8);
-  void begin_step() override;
+  Adam(scalar lr = 0.001, scalar b1 = 0.9, scalar b2 = 0.999, scalar eps = 1e-8);
   void update(Tensor &param, const Tensor &grad) override;
+  void begin_step() override;
 };
 
 class RMSprop : public Optimizer {
 public:
-  double learning_rate;
-  double rho;
-  double epsilon;
+  scalar learning_rate, rho, epsilon;
+  std::unordered_map<int, Tensor> v;
 
-  std::unordered_map<double *, Tensor> v;
-
-  RMSprop(double lr = 0.001, double rho = 0.9, double eps = 1e-8);
+  RMSprop(scalar lr = 0.001, scalar rho = 0.9, scalar eps = 1e-8);
   void update(Tensor &param, const Tensor &grad) override;
 };
 

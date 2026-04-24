@@ -24,8 +24,8 @@ public:
 
 class LeakyReLU : public Activation {
 public:
-  double alpha;
-  LeakyReLU(double alpha = 0.01) : alpha(alpha) {}
+  scalar alpha;
+  LeakyReLU(scalar alpha = 0.01) : alpha(alpha) {}
   Tensor forward(const Tensor &input) override;
   Tensor backward(const Tensor &input, const Tensor &grad_output) override;
 };

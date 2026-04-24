@@ -2,14 +2,14 @@
 #include <cmath>
 #include <stdexcept>
 
-double MSE::forward(const Tensor &y_pred, const Tensor &y_true) {
+scalar MSE::forward(const Tensor &y_pred, const Tensor &y_true) {
   if (y_pred.rows != y_true.rows || y_pred.cols != y_true.cols) {
     throw std::invalid_argument("MSE: Dimensions mismatch");
   }
-  double sum = 0.0;
+  scalar sum = 0.0f;
   int size = y_pred.rows * y_pred.cols;
   for (int i = 0; i < size; ++i) {
-    double diff = y_pred.data[i] - y_true.data[i];
+    scalar diff = y_pred.data[i] - y_true.data[i];
     sum += diff * diff;
   }
   return sum / size;
@@ -19,21 +19,19 @@ Tensor MSE::backward(const Tensor &y_pred, const Tensor &y_true) {
   if (y_pred.rows != y_true.rows || y_pred.cols != y_true.cols) {
     throw std::invalid_argument("MSE Backward: Dimensions mismatch");
   }
-  int rows = y_pred.rows;
-  int cols = y_pred.cols;
-  int size = rows * cols;
-  Tensor grad(rows, cols);
+  int size = y_pred.rows * y_pred.cols;
+  Tensor grad(y_pred.rows, y_pred.cols);
   for (int i = 0; i < size; ++i) {
-    grad.data[i] = 2.0 * (y_pred.data[i] - y_true.data[i]) / size;
+    grad.data[i] = 2.0f * (y_pred.data[i] - y_true.data[i]) / size;
   }
   return grad;
 }
 
-double MAE::forward(const Tensor &y_pred, const Tensor &y_true) {
+scalar MAE::forward(const Tensor &y_pred, const Tensor &y_true) {
   if (y_pred.rows != y_true.rows || y_pred.cols != y_true.cols) {
     throw std::invalid_argument("MAE: Dimensions mismatch");
   }
-  double sum = 0.0;
+  scalar sum = 0.0f;
   int size = y_pred.rows * y_pred.cols;
   for (int i = 0; i < size; ++i) {
     sum += std::abs(y_pred.data[i] - y_true.data[i]);
@@ -45,36 +43,34 @@ Tensor MAE::backward(const Tensor &y_pred, const Tensor &y_true) {
   if (y_pred.rows != y_true.rows || y_pred.cols != y_true.cols) {
     throw std::invalid_argument("MAE Backward: Dimensions mismatch");
   }
-  int rows = y_pred.rows;
-  int cols = y_pred.cols;
-  int size = rows * cols;
-  Tensor grad(rows, cols);
+  int size = y_pred.rows * y_pred.cols;
+  Tensor grad(y_pred.rows, y_pred.cols);
   for (int i = 0; i < size; ++i) {
-    double diff = y_pred.data[i] - y_true.data[i];
+    scalar diff = y_pred.data[i] - y_true.data[i];
     if (diff > 0)
-      grad.data[i] = 1.0 / size;
+      grad.data[i] = 1.0f / size;
     else if (diff < 0)
-      grad.data[i] = -1.0 / size;
+      grad.data[i] = -1.0f / size;
     else
-      grad.data[i] = 0.0;
+      grad.data[i] = 0.0f;
   }
   return grad;
 }
 
-Huber::Huber(double d) : delta(d) {}
+Huber::Huber(scalar d) : delta(d) {}
 
-double Huber::forward(const Tensor &y_pred, const Tensor &y_true) {
+scalar Huber::forward(const Tensor &y_pred, const Tensor &y_true) {
   if (y_pred.rows != y_true.rows || y_pred.cols != y_true.cols) {
     throw std::invalid_argument("Huber: Dimensions mismatch");
   }
-  double sum = 0.0;
+  scalar sum = 0.0f;
   int size = y_pred.rows * y_pred.cols;
   for (int i = 0; i < size; ++i) {
-    double diff = std::abs(y_pred.data[i] - y_true.data[i]);
+    scalar diff = std::abs(y_pred.data[i] - y_true.data[i]);
     if (diff <= delta) {
-      sum += 0.5 * diff * diff;
+      sum += 0.5f * diff * diff;
     } else {
-      sum += delta * (diff - 0.5 * delta);
+      sum += delta * (diff - 0.5f * delta);
     }
   }
   return sum / size;
@@ -84,12 +80,10 @@ Tensor Huber::backward(const Tensor &y_pred, const Tensor &y_true) {
   if (y_pred.rows != y_true.rows || y_pred.cols != y_true.cols) {
     throw std::invalid_argument("Huber Backward: Dimensions mismatch");
   }
-  int rows = y_pred.rows;
-  int cols = y_pred.cols;
-  int size = rows * cols;
-  Tensor grad(rows, cols);
+  int size = y_pred.rows * y_pred.cols;
+  Tensor grad(y_pred.rows, y_pred.cols);
   for (int i = 0; i < size; ++i) {
-    double diff = y_pred.data[i] - y_true.data[i];
+    scalar diff = y_pred.data[i] - y_true.data[i];
     if (std::abs(diff) <= delta) {
       grad.data[i] = diff / size;
     } else {
@@ -99,17 +93,17 @@ Tensor Huber::backward(const Tensor &y_pred, const Tensor &y_true) {
   return grad;
 }
 
-double BCE::forward(const Tensor &y_pred, const Tensor &y_true) {
+scalar BCE::forward(const Tensor &y_pred, const Tensor &y_true) {
   if (y_pred.rows != y_true.rows || y_pred.cols != y_true.cols) {
     throw std::invalid_argument("BCE: Dimensions mismatch");
   }
-  double sum = 0.0;
+  scalar sum = 0.0f;
   int size = y_pred.rows * y_pred.cols;
-  const double epsilon = 1e-7;
+  const scalar epsilon = 1e-7f;
   for (int i = 0; i < size; ++i) {
-    double p = std::max(epsilon, std::min(1.0 - epsilon, y_pred.data[i]));
-    double t = y_true.data[i];
-    sum -= (t * std::log(p) + (1.0 - t) * std::log(1.0 - p));
+    scalar p = std::max(epsilon, std::min(1.0f - epsilon, y_pred.data[i]));
+    scalar t = y_true.data[i];
+    sum -= (t * std::log(p) + (1.0f - t) * std::log(1.0f - p));
   }
   return sum / size;
 }
@@ -118,33 +112,27 @@ Tensor BCE::backward(const Tensor &y_pred, const Tensor &y_true) {
   if (y_pred.rows != y_true.rows || y_pred.cols != y_true.cols) {
     throw std::invalid_argument("BCE Backward: Dimensions mismatch");
   }
-  int rows = y_pred.rows;
-  int cols = y_pred.cols;
-  int size = rows * cols;
-  Tensor grad(rows, cols);
-  const double epsilon = 1e-7;
+  int size = y_pred.rows * y_pred.cols;
+  Tensor grad(y_pred.rows, y_pred.cols);
+  const scalar epsilon = 1e-7f;
   for (int i = 0; i < size; ++i) {
-    double p = std::max(epsilon, std::min(1.0 - epsilon, y_pred.data[i]));
-    double t = y_true.data[i];
-    if (y_pred.data[i] <= epsilon || y_pred.data[i] >= 1.0 - epsilon) {
-      grad.data[i] = 0.0;
-    } else {
-      grad.data[i] = (-(t / p) + (1.0 - t) / (1.0 - p)) / size;
-    }
+    scalar p = std::max(epsilon, std::min(1.0f - epsilon, y_pred.data[i]));
+    scalar t = y_true.data[i];
+    grad.data[i] = (p - t) / (p * (1.0f - p) * size);
   }
   return grad;
 }
 
-double BCEWithLogits::forward(const Tensor &logits, const Tensor &y_true) {
+scalar BCEWithLogits::forward(const Tensor &logits, const Tensor &y_true) {
   if (logits.rows != y_true.rows || logits.cols != y_true.cols) {
     throw std::invalid_argument("BCEWithLogits: Dimensions mismatch");
   }
-  double sum = 0.0;
+  scalar sum = 0.0f;
   int size = logits.rows * logits.cols;
   for (int i = 0; i < size; ++i) {
-    double x = logits.data[i];
-    double t = y_true.data[i];
-    sum += std::max(x, 0.0) - x * t + std::log(1.0 + std::exp(-std::abs(x)));
+    scalar x = logits.data[i];
+    scalar t = y_true.data[i];
+    sum += std::max(x, 0.0f) - x * t + std::log(1.0f + std::exp(-std::abs(x)));
   }
   return sum / size;
 }
@@ -156,22 +144,22 @@ Tensor BCEWithLogits::backward(const Tensor &logits, const Tensor &y_true) {
   int size = logits.rows * logits.cols;
   Tensor grad(logits.rows, logits.cols);
   for (int i = 0; i < size; ++i) {
-    double p = 1.0 / (1.0 + std::exp(-logits.data[i]));
-    double t = y_true.data[i];
+    scalar p = 1.0f / (1.0f + std::exp(-logits.data[i]));
+    scalar t = y_true.data[i];
     grad.data[i] = (p - t) / size;
   }
   return grad;
 }
 
-double CCE::forward(const Tensor &y_pred, const Tensor &y_true) {
+scalar CCE::forward(const Tensor &y_pred, const Tensor &y_true) {
   if (y_pred.rows != y_true.rows || y_pred.cols != y_true.cols) {
     throw std::invalid_argument("CCE: Dimensions mismatch");
   }
-  double sum = 0.0;
+  scalar sum = 0.0f;
   int size = y_pred.rows * y_pred.cols;
-  const double epsilon = 1e-15;
+  const scalar epsilon = 1e-15f;
   for (int i = 0; i < size; ++i) {
-    double p = std::max(epsilon, std::min(1.0 - epsilon, y_pred.data[i]));
+    scalar p = std::max(epsilon, std::min(1.0f - epsilon, y_pred.data[i]));
     sum -= (y_true.data[i] * std::log(p));
   }
   return sum / size;
@@ -181,13 +169,11 @@ Tensor CCE::backward(const Tensor &y_pred, const Tensor &y_true) {
   if (y_pred.rows != y_true.rows || y_pred.cols != y_true.cols) {
     throw std::invalid_argument("CCE Backward: Dimensions mismatch");
   }
-  int rows = y_pred.rows;
-  int cols = y_pred.cols;
-  int size = rows * cols;
-  Tensor grad(rows, cols);
-  const double epsilon = 1e-15;
+  int size = y_pred.rows * y_pred.cols;
+  Tensor grad(y_pred.rows, y_pred.cols);
+  const scalar epsilon = 1e-15f;
   for (int i = 0; i < size; ++i) {
-    double p = std::max(epsilon, std::min(1.0 - epsilon, y_pred.data[i]));
+    scalar p = std::max(epsilon, std::min(1.0f - epsilon, y_pred.data[i]));
     grad.data[i] = (-y_true.data[i] / p) / size;
   }
   return grad;

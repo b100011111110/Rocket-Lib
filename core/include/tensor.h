@@ -3,22 +3,27 @@
 
 #include <iostream>
 #include <stdexcept>
+#include <vector>
+
+typedef float scalar;
 
 class Tensor {
 public:
-  int rows;
-  int cols;
-  double *data;
+  int rows, cols;
+  scalar *data;
   bool owns_memory;
+  int id;
 
   Tensor();
   Tensor(int r, int c);
-  Tensor(int r, int c, double *weights);
-
+  Tensor(int r, int c, scalar *weights);
   Tensor(const Tensor &other);
-
+  Tensor(Tensor &&other) noexcept;
+  Tensor &operator=(const Tensor &other);
+  Tensor &operator=(Tensor &&other) noexcept;
   ~Tensor();
-  Tensor &operator=(Tensor other);
+
+  void init_params();
 
   Tensor operator+(const Tensor &other) const;
   Tensor &operator+=(const Tensor &other);
