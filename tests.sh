@@ -40,6 +40,15 @@ echo "   Stacked LSTM Spam Correctness (Acc/Prec/Rec/F1)  "
 echo "----------------------------------------------------"
 python3 samples/spam_benchmark.py
 
+echo "\n[8/8] Running Transformer Encoder Keras Comparison..."
+# Ensure dataset is present before running
+mkdir -p samples/data
+if [ ! -f samples/data/sms.tsv ]; then
+    echo "Downloading SMS Spam Collection Dataset..."
+    curl -sSL https://raw.githubusercontent.com/justmarkham/pycon-2016-tutorial/master/data/sms.tsv -o samples/data/sms.tsv
+fi
+python3 testing/compare_transformer_keras.py
+
 echo "\n===================================================="
 echo "          ALL TESTS COMPLETED SUCCESSFULLY          "
 echo "===================================================="

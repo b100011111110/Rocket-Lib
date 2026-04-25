@@ -1,4 +1,5 @@
 #include <cmath>
+#include <chrono>
 #include <cstring>
 #include <random>
 #include <stdexcept>
@@ -35,7 +36,7 @@ void Tensor::init_params() {
   if (!data || rows <= 0 || cols <= 0) return;
   
   scalar limit = std::sqrt(6.0f / (rows + cols));
-  static std::mt19937 gen(42);
+  static std::mt19937 gen(std::chrono::steady_clock::now().time_since_epoch().count());
   std::uniform_real_distribution<scalar> dis(-limit, limit);
 
   for (int i = 0; i < rows * cols; ++i) {

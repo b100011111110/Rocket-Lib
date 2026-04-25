@@ -142,6 +142,36 @@ PYBIND11_MODULE(rocket, m) {
       .def_readwrite("weights_hh", &LSTMLayer::weights_hh)
       .def_readwrite("biases", &LSTMLayer::biases);
 
+  py::class_<LayerNormLayer, Layer>(m, "LayerNormLayer")
+      .def(py::init<int, scalar>(), py::arg("feature_dim"), py::arg("epsilon") = 1e-5);
+
+  py::class_<SelfAttentionLayer, Layer>(m, "SelfAttentionLayer")
+      .def(py::init<int, int>(), py::arg("embed_dim"), py::arg("seq_len"));
+
+  py::class_<TransformerEncoderLayer, Layer>(m, "TransformerEncoderLayer")
+      .def(py::init<int, int, int>(), py::arg("embed_dim"), py::arg("seq_len"), py::arg("ff_dim") = -1);
+
+  py::class_<MaskedSelfAttentionLayer, Layer>(m, "MaskedSelfAttentionLayer")
+      .def(py::init<int, int>(), py::arg("embed_dim"), py::arg("seq_len"));
+
+  py::class_<TransformerDecoderLayer, Layer>(m, "TransformerDecoderLayer")
+      .def(py::init<int, int, int>(), py::arg("embed_dim"), py::arg("seq_len"), py::arg("ff_dim") = -1);
+
+  py::class_<MaskedMultiHeadAttentionLayer, Layer>(m, "MaskedMultiHeadAttentionLayer")
+      .def(py::init<int, int, int>(), py::arg("embed_dim"), py::arg("seq_len"), py::arg("num_heads"));
+
+  py::class_<TransformerMHDecoderLayer, Layer>(m, "TransformerMHDecoderLayer")
+      .def(py::init<int, int, int, int>(), py::arg("embed_dim"), py::arg("seq_len"), py::arg("ff_dim") = -1, py::arg("num_heads") = 1);
+
+  py::class_<MultiHeadAttentionLayer, Layer>(m, "MultiHeadAttentionLayer")
+      .def(py::init<int, int, int>(), py::arg("embed_dim"), py::arg("seq_len"), py::arg("num_heads"));
+
+  py::class_<TransformerMHEncoderLayer, Layer>(m, "TransformerMHEncoderLayer")
+      .def(py::init<int, int, int, int, scalar>(), py::arg("embed_dim"), py::arg("seq_len"), py::arg("ff_dim") = -1, py::arg("num_heads") = 1, py::arg("dropout_rate") = 0.1);
+
+  py::class_<GlobalAveragePooling1DLayer, Layer>(m, "GlobalAveragePooling1DLayer")
+      .def(py::init<int, int>(), py::arg("seq_len"), py::arg("embed_dim"));
+
   // Bind Activations
   py::class_<Activation, PyActivation>(m, "Activation").def(py::init<>());
 
@@ -153,14 +183,20 @@ PYBIND11_MODULE(rocket, m) {
 
   py::class_<Linear, Activation>(m, "Linear").def(py::init<>());
 
+  py::class_<Softmax, Activation>(m, "Softmax").def(py::init<>());
+
   // Bind Losses
   py::class_<Loss, PyLoss>(m, "Loss").def(py::init<>());
 
   py::class_<MSE, Loss>(m, "MSE").def(py::init<>());
 
+  py::class_<MAE, Loss>(m, "MAE").def(py::init<>());
+
   py::class_<BCE, Loss>(m, "BCE").def(py::init<>());
 
   py::class_<BCEWithLogits, Loss>(m, "BCEWithLogits").def(py::init<>());
+
+  py::class_<CCE, Loss>(m, "CCE").def(py::init<>());
 
   // Bind Optimizers
   py::class_<Optimizer, PyOptimizer>(m, "Optimizer").def(py::init<>());

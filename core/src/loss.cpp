@@ -162,7 +162,8 @@ scalar CCE::forward(const Tensor &y_pred, const Tensor &y_true) {
     scalar p = std::max(epsilon, std::min(1.0f - epsilon, y_pred.data[i]));
     sum -= (y_true.data[i] * std::log(p));
   }
-  return sum / size;
+  // Divide by number of samples (rows) instead of total elements
+  return sum / y_pred.rows;
 }
 
 Tensor CCE::backward(const Tensor &y_pred, const Tensor &y_true) {
@@ -174,7 +175,8 @@ Tensor CCE::backward(const Tensor &y_pred, const Tensor &y_true) {
   const scalar epsilon = 1e-15f;
   for (int i = 0; i < size; ++i) {
     scalar p = std::max(epsilon, std::min(1.0f - epsilon, y_pred.data[i]));
-    grad.data[i] = (-y_true.data[i] / p) / size;
+    // Divide by number of samples (rows) instead of total elements
+    grad.data[i] = (-y_true.data[i] / p) / y_pred.rows;
   }
   return grad;
 }
