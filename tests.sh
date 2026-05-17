@@ -5,7 +5,7 @@ echo "===================================================="
 echo "          ROCKET-LIB TEST & BENCHMARK SUITE         "
 echo "===================================================="
 
-echo "\n[1/7] Building Core Engine..."
+echo -e "\n[1/5] Building Core Engine..."
 mkdir -p build
 cd build
 cmake ../core > /dev/null
@@ -16,42 +16,32 @@ export ROCKET_SEED=42
 export ROCKET_SHUFFLE=1
 export PYTHONPATH=$(pwd)/build
 
-echo "\n[2/7] Running Binary Classification Benchmark..."
-python3 samples/binary_classification.py
+# Make sure tests/data directory exists
+mkdir -p tests/data
 
-echo "\n[3/7] Running ResNet DAG Benchmark..."
-python3 samples/resnet_dag.py
-
-echo "\n[4/7] Running Comprehensive Model Benchmark..."
-python3 samples/comprehensive_model.py
-
-echo "\n[5/7] Running Full Parity & Metric Verification..."
-python3 testing/compare_pytorch.py
-
-echo "\n[6/7] Verifying API Features & Serialization..."
-python3 testing/feature_test.py
-
-echo "\n[7/7] Running RNN/LSTM Benchmarks & Correctness..."
-python3 testing/test_rnn_lstm.py
-python3 testing/verify_correctness.py
-
-echo "\n----------------------------------------------------"
-echo "   Stacked LSTM Spam Correctness (Acc/Prec/Rec/F1)  "
-echo "----------------------------------------------------"
-python3 samples/spam_benchmark.py
-
-echo "\n[8/8] Running Transformer PyTorch Comparison..."
-# Ensure dataset is present before running
-mkdir -p samples/data
-if [ ! -f samples/data/sms.tsv ]; then
+# Download datasets if not already present
+if [ ! -f tests/data/sms.tsv ]; then
     echo "Downloading SMS Spam Collection Dataset..."
-    curl -sSL https://raw.githubusercontent.com/justmarkham/pycon-2016-tutorial/master/data/sms.tsv -o samples/data/sms.tsv
+    curl -sSL https://raw.githubusercontent.com/justmarkham/pycon-2016-tutorial/master/data/sms.tsv -o tests/data/sms.tsv
 fi
-python3 testing/compare_transformer_pytorch.py
-python3 testing/compare_encoder_pytorch.py
-python3 testing/compare_decoder_pytorch.py
-python3 testing/pytorch_reg.py
 
-echo "\n===================================================="
+if [ ! -f tests/data/emotion.csv ]; then
+    echo "Downloading Emotion Dataset..."
+    curl -sSL https://raw.githubusercontent.com/dair-ai/emotion_dataset/main/dist/emotion.csv -o tests/data/emotion.csv
+fi
+
+echo -e "\n[2/5] Running Core API & DAG Model Tests..."
+python3 tests/test_core_api.py
+
+echo -e "\n[3/5] Running Feed-Forward PyTorch Parity Tests..."
+python3 tests/test_ff_parity.py
+
+echo -e "\n[4/5] Running RNN & LSTM Parity & Spam Benchmarks..."
+python3 tests/test_rnn_lstm_parity.py
+
+echo -e "\n[5/5] Running Transformer Encoder & Decoder Parity Tests..."
+python3 tests/test_transformer_parity.py
+
+echo -e "\n===================================================="
 echo "          ALL TESTS COMPLETED SUCCESSFULLY          "
 echo "===================================================="

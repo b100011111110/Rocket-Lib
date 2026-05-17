@@ -75,7 +75,7 @@ We don't just "add threads." The engine analyzes the workload of each layer:
 Set `ROCKET_SEED` in your environment to ensure deterministic results for dropout masks.
 ```bash
 export ROCKET_SEED=42
-python samples/binary_classification.py
+python tests/binary_classification.py
 ```
 
 

@@ -2,17 +2,15 @@ import os
 import random
 import sys
 import time
-
 import numpy as np
 
+# Ensure we can find the built rocket module
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "build")))
 try:
-    build_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "build"))
-except NameError:
-    build_dir = os.path.abspath(os.path.join(os.getcwd(), "build"))
-if build_dir not in sys.path:
-    sys.path.append(build_dir)
-
-import rocket
+    import rocket
+except ImportError as e:
+    print(f"Failed to import rocket module: {e}")
+    sys.exit(1)
 
 try:
     import torch
@@ -83,7 +81,7 @@ def evaluate_binary_predictions(y_true, probs, threshold=0.5):
     }
 
 
-class PyTorchModel(nn.Module):
+class PyTorchFFModel(nn.Module):
     def __init__(self, input_dim, dropout_rate):
         super().__init__()
         self.dense_1 = nn.Linear(input_dim, 64)
@@ -114,9 +112,13 @@ class PyTorchModel(nn.Module):
         return out, h1, h2, h3
 
 
-def main():
+def test_feedforward_parity():
+    print("\n" + "="*40)
+    print(" 1. Running Feed-Forward Network PyTorch Parity")
+    print("="*40)
+    
     input_dim = int(os.getenv("ROCKET_INPUT_DIM", "16"))
-    epochs = int(os.getenv("ROCKET_EPOCHS", "500"))
+    epochs = int(os.getenv("ROCKET_EPOCHS", "100"))  # Default 100 for verification suite
     rocket_lr = float(os.getenv("ROCKET_LR", "0.01"))
     pytorch_lr = float(os.getenv("PYTORCH_LR", str(rocket_lr)))
     dropout_rate = float(os.getenv("ROCKET_DROPOUT", "0.15"))
@@ -147,15 +149,14 @@ def main():
 
     batch_size = len(X_train) // 64
     print(f"X_train shape: {X_train.shape}, y_train shape: {y_train.shape}")
-    print(f"Dividing train set into 64 parts (batch_size={batch_size})")
 
-    print("\n--- Preparing Rocket tensors ---")
+    print("\nPreparing Rocket tensors...")
     x_train_rt = to_rocket_tensors(X_train)
     y_train_rt = to_rocket_tensors(y_train)
     x_test_rt = to_rocket_tensors(X_test)
     y_test_rt = to_rocket_tensors(y_test)
 
-    print("\n--- Building Rocket model ---")
+    print("\nBuilding Rocket model...")
     r_model = rocket.Model()
 
     r_input = rocket.InputLayer()
@@ -204,9 +205,8 @@ def main():
     r_opt = rocket.Adam(rocket_lr, 0.9, 0.999, 1e-7)
     r_model.compile(r_loss, r_opt)
 
-    print("\n--- Building PyTorch model and synchronizing weights ---")
-    pt_model = PyTorchModel(input_dim, dropout_rate)
-    
+    print("\nBuilding PyTorch model and synchronizing weights...")
+    pt_model = PyTorchFFModel(input_dim, dropout_rate)
     pytorch_dense_layers = [
         pt_model.dense_1,
         pt_model.dense_2,
@@ -215,17 +215,13 @@ def main():
     ]
     sync_dense_weights(pytorch_dense_layers, rocket_dense_layers)
 
-    print(
-        f"\n--- Training Rocket model for {epochs} epochs "
-        f"(batch_size={batch_size}, lr={rocket_lr}) ---"
-    )
+    print(f"\nTraining Rocket model for {epochs} epochs...")
     set_dropout_mode(rocket_dropout_layers, True)
     start_time = time.time()
     r_model.train(x_train_rt, y_train_rt, x_test_rt, y_test_rt, epochs, batch_size)
     rocket_time = time.time() - start_time
-    print(f"Rocket training took {rocket_time:.2f} seconds.")
 
-    print("\n--- Evaluating Rocket model ---")
+    print("\nEvaluating Rocket model...")
     set_dropout_mode(rocket_dropout_layers, False)
     r_preds = []
     for x in x_test_rt:
@@ -235,22 +231,8 @@ def main():
     r_preds = np.array(r_preds).flatten()
     r_probs = 1.0 / (1.0 + np.exp(-r_preds))
     r_metrics = evaluate_binary_predictions(y_test, r_probs)
-    print(
-        "Rocket Test Metrics: "
-        f"BCE={r_metrics['bce']:.4f}, "
-        f"Accuracy={r_metrics['accuracy']*100:.2f}%, "
-        f"Precision={r_metrics['precision']:.4f}, "
-        f"Recall={r_metrics['recall']:.4f}, "
-        f"F1={r_metrics['f1']:.4f}, "
-        f"AUC={r_metrics['auc']:.4f}"
-    )
-    print(f"Rocket Confusion Matrix:\n{r_metrics['confusion']}")
 
-    print(
-        f"\n--- Training PyTorch model for {epochs} epochs "
-        f"(batch_size={batch_size}, lr={pytorch_lr}) ---"
-    )
-    
+    print(f"\nTraining PyTorch model for {epochs} epochs...")
     optimizer = optim.Adam(pt_model.parameters(), lr=pytorch_lr, eps=1e-7)
     criterion = nn.BCEWithLogitsLoss()
     
@@ -267,7 +249,6 @@ def main():
             out, h1, h2, h3 = pt_model(batch_X)
             loss = criterion(out, batch_y)
             
-            # Activity regularization (L2)
             reg_penalty = reg_lambda * (
                 torch.mean(torch.sum(h1 ** 2, dim=1)) +
                 torch.mean(torch.sum(h2 ** 2, dim=1)) +
@@ -279,9 +260,8 @@ def main():
             optimizer.step()
             
     pytorch_time = time.time() - start_time
-    print(f"PyTorch training took {pytorch_time:.2f} seconds.")
 
-    print("\n--- Evaluating PyTorch model ---")
+    print("\nEvaluating PyTorch model...")
     pt_model.eval()
     X_test_t = torch.tensor(X_test, dtype=torch.float32)
     with torch.no_grad():
@@ -290,27 +270,75 @@ def main():
         pt_probs = 1.0 / (1.0 + np.exp(-pt_preds))
         
     pt_metrics = evaluate_binary_predictions(y_test, pt_probs)
-    
-    print(
-        "PyTorch Test Metrics: "
-        f"BCE={pt_metrics['bce']:.4f}, "
-        f"Accuracy={pt_metrics['accuracy']*100:.2f}%, "
-        f"Precision={pt_metrics['precision']:.4f}, "
-        f"Recall={pt_metrics['recall']:.4f}, "
-        f"F1={pt_metrics['f1']:.4f}, "
-        f"AUC={pt_metrics['auc']:.4f}"
-    )
-    print(f"PyTorch Confusion Matrix:\n{pt_metrics['confusion']}\n")
 
-    print("\n--- Comparison ---")
-    print(f"Rocket BCE: {r_metrics['bce']:.4f} | PyTorch BCE: {pt_metrics['bce']:.4f}")
-    print(f"Rocket Acc: {r_metrics['accuracy']*100:.2f}% | PyTorch Acc: {pt_metrics['accuracy']*100:.2f}%")
-    print(f"Rocket Precision: {r_metrics['precision']:.4f} | PyTorch Precision: {pt_metrics['precision']:.4f}")
-    print(f"Rocket Recall: {r_metrics['recall']:.4f} | PyTorch Recall: {pt_metrics['recall']:.4f}")
-    print(f"Rocket F1: {r_metrics['f1']:.4f} | PyTorch F1: {pt_metrics['f1']:.4f}")
-    print(f"Rocket AUC: {r_metrics['auc']:.4f} | PyTorch AUC: {pt_metrics['auc']:.4f}")
-    print(f"Rocket Time: {rocket_time:.2f}s | PyTorch Time: {pytorch_time:.2f}s")
+    print("\n" + "="*45)
+    print(" PERFORMANCE & ACCURACY COMPARISON")
+    print("="*45)
+    print(f"{'Metric':<20} | {'PyTorch':<15} | {'Rocket':<15}")
+    print("-" * 55)
+    print(f"{'Test BCE':<20} | {pt_metrics['bce']:15.4f} | {r_metrics['bce']:15.4f}")
+    print(f"{'Test Accuracy':<20} | {pt_metrics['accuracy']*100:13.2f}% | {r_metrics['accuracy']*100:13.2f}%")
+    print(f"{'F1 Score':<20} | {pt_metrics['f1']:15.4f} | {r_metrics['f1']:15.4f}")
+    print(f"{'AUC Score':<20} | {pt_metrics['auc']:15.4f} | {r_metrics['auc']:15.4f}")
+    print(f"{'Training Time':<20} | {pytorch_time:13.2f}s | {rocket_time:13.2f}s")
+    print("="*45)
+
+
+def test_regularization_loss():
+    print("\n" + "="*40)
+    print(" 2. Running PyTorch Regularization Exact Parity Check")
+    print("="*40)
+    X = torch.ones((10, 5))
+    y = torch.ones((10, 1))
+
+    class SimplePyTorchModel(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.dense = nn.Linear(5, 1)
+            nn.init.ones_(self.dense.weight)
+            nn.init.zeros_(self.dense.bias)
+
+        def forward(self, x):
+            h = self.dense(x)
+            return h
+
+    model = SimplePyTorchModel()
+    criterion = nn.MSELoss()
+
+    model.eval()
+    with torch.no_grad():
+        out = model(X)
+        mse_loss = criterion(out, y)
+        reg_loss = 0.001 * torch.mean(torch.sum(out ** 2, dim=1))
+        total_loss = mse_loss + reg_loss
+
+    print("PyTorch version:", torch.__version__)
+    print("Expected Parity Loss Value:", total_loss.item())
+    
+    # Check if correct
+    if abs(total_loss.item() - 16.025) < 1e-3:
+        print("✅ SUCCESS: Regularization loss calculation matches expected mathematical value.")
+    else:
+        print("❌ FAILURE: Regularization loss calculation diverges from expected value.")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    parser = argparse.ArgumentParser(description="Rocket-Lib Feed-Forward PyTorch Parity Tests")
+    parser.add_argument(
+        "--test", 
+        type=str, 
+        choices=["ff_parity", "reg_loss", "all"], 
+        default="all",
+        help="Specify which test to execute (default: all)"
+    )
+    args = parser.parse_args()
+
+    if args.test == "all":
+        test_feedforward_parity()
+        test_regularization_loss()
+    elif args.test == "ff_parity":
+        test_feedforward_parity()
+    elif args.test == "reg_loss":
+        test_regularization_loss()

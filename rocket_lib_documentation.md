@@ -510,7 +510,7 @@ Rocket-Lib's behavior can be modified at runtime through environment variables. 
 ```bash
 export ROCKET_SEED=42
 export ROCKET_SHUFFLE=0
-python samples/binary_classification.py
+python tests/binary_classification.py
 ```
 
 **Note on DenseLayer initialization:** `DenseLayer` uses `std::random_device` internally for Xavier weight initialization, which is non-deterministic. Setting `ROCKET_SEED` controls dropout and shuffling but does not currently fix DenseLayer initialization. Results are stable in practice but not bit-for-bit reproducible across runs.
@@ -629,7 +629,7 @@ def sync_weights(pytorch_dense_layers, rocket_dense_layers):
             r_layer.biases.set_val(0, j, float(biases[j]))
 ```
 
-Copying PyTorch-initialized weights into Rocket layers ensures both engines start from identical parameters — useful for gradient parity verification. See `testing/compare_pytorch.py` for a full example.
+Copying PyTorch-initialized weights into Rocket layers ensures both engines start from identical parameters — useful for gradient parity verification. See `tests/compare_pytorch.py` for a full example.
 
 ---
 
