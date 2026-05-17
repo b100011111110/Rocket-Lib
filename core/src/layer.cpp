@@ -265,22 +265,30 @@ const Tensor &RNNLayer::forward(const Tensor &input) {
   // Precompute W_ih * X for all time steps
   Tensor x_ih = input * weights_ih;
 
-  Tensor h_prev_batch(batch_size, hidden_dim);
-  for(int i=0; i<batch_size*hidden_dim; ++i) h_prev_batch.data[i] = 0;
+  // Single parallel_for dispatch over the batch, running all sequence steps in-place
+  ThreadPool::getInstance().parallel_for(0, batch_size, [this, &x_ih](int b) {
+    std::vector<scalar> h_prev(hidden_dim, 0.0f);
 
-  for (int s = 0; s < seq_len; ++s) {
-    Tensor gates_hh = h_prev_batch * weights_hh;
-
-    ThreadPool::getInstance().parallel_for(0, batch_size, [this, &x_ih, &gates_hh, &h_prev_batch, s, batch_size](int b) {
+    for (int s = 0; s < seq_len; ++s) {
       int row_idx = b * seq_len + s;
       int x_ih_base = row_idx * hidden_dim;
-      int hh_base = b * hidden_dim;
+
+      // Compute recurrent gate projection for this sample and this step
+      std::vector<scalar> g_rec(hidden_dim, 0.0f);
+      for (int i = 0; i < hidden_dim; ++i) {
+        scalar h_val = h_prev[i];
+        if (h_val == 0) continue;
+        const scalar* w_row = &weights_hh.data[i * hidden_dim];
+        for (int j = 0; j < hidden_dim; ++j) {
+          g_rec[j] += h_val * w_row[j];
+        }
+      }
 
       for (int h = 0; h < hidden_dim; ++h) {
-        scalar val = biases.data[h] + x_ih.data[x_ih_base + h] + gates_hh.data[hh_base + h];
+        scalar val = biases.data[h] + x_ih.data[x_ih_base + h] + g_rec[h];
         scalar act = std::tanh(val);
         h_states.data[row_idx * hidden_dim + h] = act;
-        h_prev_batch.data[b * hidden_dim + h] = act;
+        h_prev[h] = act;
 
         if (return_sequences) {
           output.data[row_idx * hidden_dim + h] = act;
@@ -288,8 +296,8 @@ const Tensor &RNNLayer::forward(const Tensor &input) {
           output.data[b * hidden_dim + h] = act;
         }
       }
-    });
-  }
+    }
+  });
 
   return output;
 }
@@ -440,43 +448,34 @@ const Tensor &LSTMLayer::forward(const Tensor &input) {
     gates = Tensor(batch_size * seq_len, 4 * hidden_dim);
   }
   
-  if (workspace_gates_hh.rows != batch_size || workspace_gates_hh.cols != 4 * hidden_dim) {
-      workspace_gates_hh = Tensor(batch_size, 4 * hidden_dim);
-      workspace_h_prev = Tensor(batch_size, hidden_dim);
-      workspace_c_prev = Tensor(batch_size, hidden_dim);
-  }
-  
-  std::memset(workspace_h_prev.data, 0, batch_size * hidden_dim * sizeof(scalar));
-  std::memset(workspace_c_prev.data, 0, batch_size * hidden_dim * sizeof(scalar));
-
   ensure_output_dims(return_sequences ? batch_size * seq_len : batch_size, hidden_dim);
 
   Tensor x_ih = input * weights_ih;
 
-  for (int s = 0; s < seq_len; ++s) {
-        std::memset(workspace_gates_hh.data, 0, batch_size * 4 * hidden_dim * sizeof(scalar));
+  // Single parallel_for dispatch over the batch, running all sequence steps in-place
+  ThreadPool::getInstance().parallel_for(0, batch_size, [this, &x_ih](int b) {
+    std::vector<scalar> h_prev(hidden_dim, 0.0f);
+    std::vector<scalar> c_prev(hidden_dim, 0.0f);
 
-        ThreadPool::getInstance().parallel_for(0, batch_size, [this](int b) {
-            int h_dim = this->hidden_dim;
-            scalar* g_row = &workspace_gates_hh.data[b * 4 * h_dim];
-            for (int i = 0; i < h_dim; ++i) {
-                scalar h_prev_val = workspace_h_prev.data[b * h_dim + i];
-                if (h_prev_val == 0) continue;
-                const scalar* w_row = &weights_hh.data[i * 4 * h_dim];
-                for (int j = 0; j < 4 * h_dim; ++j) {
-                    g_row[j] += h_prev_val * w_row[j];
-                }
-            }
-        });
-
-    ThreadPool::getInstance().parallel_for(0, batch_size, [this, &x_ih, s, batch_size](int b) {
+    for (int s = 0; s < seq_len; ++s) {
       int row_idx = b * seq_len + s;
       int gate_base = row_idx * 4 * hidden_dim;
       int x_ih_base = row_idx * 4 * hidden_dim;
-      int hh_base = b * 4 * hidden_dim;
 
+      // Compute recurrent gate projection for this sample and this step
+      std::vector<scalar> g_rec(4 * hidden_dim, 0.0f);
+      for (int i = 0; i < hidden_dim; ++i) {
+        scalar h_val = h_prev[i];
+        if (h_val == 0) continue;
+        const scalar* w_row = &weights_hh.data[i * 4 * hidden_dim];
+        for (int j = 0; j < 4 * hidden_dim; ++j) {
+          g_rec[j] += h_val * w_row[j];
+        }
+      }
+
+      // Compute gate activations
       for (int h = 0; h < 4 * hidden_dim; ++h) {
-        scalar val = biases.data[h] + x_ih.data[x_ih_base + h] + workspace_gates_hh.data[hh_base + h];
+        scalar val = biases.data[h] + x_ih.data[x_ih_base + h] + g_rec[h];
         if (h < 3 * hidden_dim) {
           gates.data[gate_base + h] = lstm_sigmoid(val);
         } else {
@@ -484,21 +483,22 @@ const Tensor &LSTMLayer::forward(const Tensor &input) {
         }
       }
 
+      // Compute cell and hidden updates
       for (int h = 0; h < hidden_dim; ++h) {
         scalar i_gate = gates.data[gate_base + h];
         scalar f_gate = gates.data[gate_base + hidden_dim + h];
         scalar o_gate = gates.data[gate_base + 2 * hidden_dim + h];
         scalar g_gate = gates.data[gate_base + 3 * hidden_dim + h];
 
-        scalar c = f_gate * workspace_c_prev.data[b * hidden_dim + h] + i_gate * g_gate;
+        scalar c = f_gate * c_prev[h] + i_gate * g_gate;
         c_states.data[row_idx * hidden_dim + h] = c;
-        workspace_c_prev.data[b * hidden_dim + h] = c;
+        c_prev[h] = c;
 
         scalar tanh_c = std::tanh(c);
         scalar h_out = o_gate * tanh_c;
-        
+
         h_states.data[row_idx * hidden_dim + h] = h_out;
-        workspace_h_prev.data[b * hidden_dim + h] = h_out;
+        h_prev[h] = h_out;
 
         if (return_sequences) {
           output.data[row_idx * hidden_dim + h] = h_out;
@@ -506,8 +506,8 @@ const Tensor &LSTMLayer::forward(const Tensor &input) {
           output.data[b * hidden_dim + h] = h_out;
         }
       }
-    });
-  }
+    }
+  });
 
   return output;
 }
@@ -796,9 +796,7 @@ const Tensor &SelfAttentionLayer::forward(const Tensor &input) {
         attention_weights.data[(b * seq_len + i) * seq_len + j] /= sum_exp;
       }
     }
-  });
 
-  ThreadPool::getInstance().parallel_for(0, batch_size, [this](int b) {
     for (int i = 0; i < seq_len; ++i) {
       for (int d = 0; d < embed_dim; ++d) {
         scalar sum = 0.0f;
@@ -1054,9 +1052,7 @@ const Tensor &MaskedSelfAttentionLayer::forward(const Tensor &input) {
         attention_weights.data[(b * seq_len + i) * seq_len + j] /= sum_exp;
       }
     }
-  });
 
-  ThreadPool::getInstance().parallel_for(0, batch_size, [this](int b) {
     for (int i = 0; i < seq_len; ++i) {
       for (int d = 0; d < embed_dim; ++d) {
         scalar sum = 0.0f;
@@ -1328,13 +1324,7 @@ const Tensor &MaskedMultiHeadAttentionLayer::forward(const Tensor &input) {
         attention_weights.data[(task_idx * seq_len + i) * seq_len + j] /= sum_exp;
       }
     }
-  });
 
-  ThreadPool::getInstance().parallel_for(0, batch_size * num_heads, [this](int task_idx) {
-    int b = task_idx / num_heads;
-    int h = task_idx % num_heads;
-    int head_offset = h * head_dim;
-    
     for (int i = 0; i < seq_len; ++i) {
       for (int d = 0; d < head_dim; ++d) {
         scalar sum = 0.0f;
@@ -1645,7 +1635,7 @@ const Tensor &MultiHeadAttentionLayer::forward(const Tensor &input) {
     int b = task_idx / num_heads;
     int h = task_idx % num_heads;
     int head_offset = h * head_dim;
-    
+
     for (int i = 0; i < seq_len; ++i) {
       for (int d = 0; d < head_dim; ++d) {
         scalar sum = 0.0f;

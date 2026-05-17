@@ -59,16 +59,11 @@ def to_rocket(arr):
     tensors = []
     if len(arr.shape) == 3:
         for sample in arr:
-            t = rocket.Tensor(sample.shape[0], sample.shape[1])
-            for i in range(sample.shape[0]):
-                for j in range(sample.shape[1]):
-                    t.set_val(i, j, float(sample[i, j]))
+            t = rocket.Tensor(sample.astype(np.float32))
             tensors.append(t)
     elif len(arr.shape) == 2:
         for row in arr:
-            t = rocket.Tensor(1, row.shape[0])
-            for i, val in enumerate(row):
-                t.set_val(0, i, float(val))
+            t = rocket.Tensor(row.reshape(1, -1).astype(np.float32))
             tensors.append(t)
     return tensors
 

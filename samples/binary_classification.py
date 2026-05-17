@@ -1,8 +1,11 @@
 import os
 import sys
-import sys
 import time
 import numpy as np
+
+# Ensure 100% stable determinism
+os.environ["ROCKET_SEED"] = "42"
+np.random.seed(42)
 
 # Ensure we can find the built rocket module
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "build")))
@@ -54,7 +57,6 @@ def main():
 
     # 5. Train Rocket
     print("\n[1/2] Training Rocket-Lib (50 epochs)...")
-    os.environ["ROCKET_SEED"] = "42"
     start_rocket = time.time()
     model.train(x_train, y_train, x_train, y_train, epochs=50, batch_size=32)
     time_rocket = time.time() - start_rocket

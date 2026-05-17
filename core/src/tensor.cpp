@@ -36,7 +36,13 @@ void Tensor::init_params() {
   if (!data || rows <= 0 || cols <= 0) return;
   
   scalar limit = std::sqrt(6.0f / (rows + cols));
-  static std::mt19937 gen(std::chrono::steady_clock::now().time_since_epoch().count());
+  static std::mt19937 gen([]() {
+    const char *seed_str = std::getenv("ROCKET_SEED");
+    if (seed_str) {
+      return std::mt19937(std::stoul(seed_str));
+    }
+    return std::mt19937(std::chrono::steady_clock::now().time_since_epoch().count());
+  }());
   std::uniform_real_distribution<scalar> dis(-limit, limit);
 
   for (int i = 0; i < rows * cols; ++i) {
@@ -151,44 +157,31 @@ Tensor Tensor::operator*(const Tensor &other) const {
         "Dimensions mismatch for matrix multiplication");
   }
   Tensor result(rows, other.cols);
-  for (int i = 0; i < rows * other.cols; ++i) {
-    result.data[i] = 0.0;
-  }
+  std::memset(result.data, 0, rows * other.cols * sizeof(scalar));
 
-  int num_threads = std::thread::hardware_concurrency();
-  int total_elements = rows * other.cols;
-  
-  if (total_elements > 10000 && num_threads > 1) {
-    std::vector<std::future<void>> futures;
-    int chunk = (rows + num_threads - 1) / num_threads;
+  const int BLOCK_SIZE = 64;
 
-    for (int t = 0; t < num_threads; ++t) {
-      int start = t * chunk;
-      int end = std::min(start + chunk, rows);
-      if (start >= end) break;
-
-      futures.push_back(ThreadPool::getInstance().enqueue([this, &other, &result, start, end]() {
-        for (int i = start; i < end; ++i) {
-          for (int k = 0; k < cols; ++k) {
-            scalar temp = data[i * cols + k];
-            if (temp == 0) continue;
-            for (int j = 0; j < other.cols; ++j) {
-              result.data[i * other.cols + j] +=
-                  temp * other.data[k * other.cols + j];
+  #pragma omp parallel for collapse(2) schedule(dynamic)
+  for (int ih = 0; ih < rows; ih += BLOCK_SIZE) {
+    for (int jh = 0; jh < other.cols; jh += BLOCK_SIZE) {
+      int i_max = std::min(ih + BLOCK_SIZE, rows);
+      int j_max = std::min(jh + BLOCK_SIZE, other.cols);
+      
+      for (int kh = 0; kh < cols; kh += BLOCK_SIZE) {
+        int k_max = std::min(kh + BLOCK_SIZE, cols);
+        
+        for (int i = ih; i < i_max; ++i) {
+          int base_res = i * other.cols;
+          int base_this = i * cols;
+          for (int k = kh; k < k_max; ++k) {
+            scalar temp = data[base_this + k];
+            if (temp == 0.0f) continue;
+            
+            int base_other = k * other.cols;
+            for (int j = jh; j < j_max; ++j) {
+              result.data[base_res + j] += temp * other.data[base_other + j];
             }
           }
-        }
-      }));
-    }
-    for (auto &f : futures) f.wait();
-  } else {
-    for (int i = 0; i < rows; ++i) {
-      for (int k = 0; k < cols; ++k) {
-        scalar temp = data[i * cols + k];
-        if (temp == 0) continue;
-        for (int j = 0; j < other.cols; ++j) {
-          result.data[i * other.cols + j] +=
-              temp * other.data[k * other.cols + j];
         }
       }
     }

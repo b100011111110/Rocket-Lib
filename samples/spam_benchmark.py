@@ -67,10 +67,10 @@ def main():
     print("Preparing 3D Tensors...")
     X_np = np.zeros((num_samples, seq_len, emb_dim), dtype=np.float32)
     for i, text in enumerate(texts):
-        for j, word in enumerate(text):
-            if j < seq_len:
-                if word in w2v.wv:
-                    X_np[i, j, :] = w2v.wv[word]
+        valid_words = [word for word in text if word in w2v.wv][:seq_len]
+        start_idx = seq_len - len(valid_words)
+        for j, word in enumerate(valid_words):
+            X_np[i, start_idx + j, :] = w2v.wv[word]
     
     # Fix seeds for reproducibility
     np.random.seed(42)
@@ -103,7 +103,7 @@ def main():
     r_model.add(dense, [lstm2])
     r_model.add(act, [dense])
     r_model.setInputOutputLayers([inp], [act])
-    r_model.compile(rocket.BCE(), rocket.Adam(lr=0.001))
+    r_model.compile(rocket.BCE(), rocket.Adam(lr=0.003))
     
     X_train_rocket = to_rocket(X_train_np)
     Y_train_rocket = to_rocket(Y_train_np)
@@ -111,7 +111,7 @@ def main():
     Y_test_rocket = to_rocket(Y_test_np)
     
     start_time = time.time()
-    r_model.train(X_train_rocket, Y_train_rocket, X_test_rocket, Y_test_rocket, epochs=10, batch_size=128)
+    r_model.train(X_train_rocket, Y_train_rocket, X_test_rocket, Y_test_rocket, epochs=15, batch_size=128)
     rocket_time = time.time() - start_time
     print(f"Rocket-Lib Training Time: {rocket_time:.4f} seconds")
 
@@ -134,7 +134,7 @@ def main():
             return out
 
     pt_model = PyTorchLSTM()
-    optimizer = optim.Adam(pt_model.parameters(), lr=0.001)
+    optimizer = optim.Adam(pt_model.parameters(), lr=0.003)
     criterion = nn.BCELoss()
 
     X_train_t = torch.tensor(X_train_np, dtype=torch.float32)
@@ -144,13 +144,16 @@ def main():
 
     start_time = time.time()
     pt_model.train()
-    for epoch in range(10):
+    for epoch in range(15):
+        total_loss = 0.0
         for batch_X, batch_y in loader:
             optimizer.zero_grad()
             out = pt_model(batch_X)
             loss = criterion(out, batch_y)
             loss.backward()
             optimizer.step()
+            total_loss += loss.item()
+        print(f"PyTorch Epoch {epoch+1}/15 - Loss: {total_loss/len(loader):.4f}")
     pytorch_time = time.time() - start_time
     print(f"PyTorch Training Time: {pytorch_time:.4f} seconds")
 
@@ -171,6 +174,38 @@ def main():
         f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
         
         return accuracy, precision, recall, f1
+
+    # --- Weight Synchronization for Parity Check ---
+    def reorder_lstm_weights(w, axis=0):
+        chunks = np.split(w, 4, axis=axis)
+        return np.concatenate([chunks[0], chunks[1], chunks[3], chunks[2]], axis=axis)
+
+    w_ih = reorder_lstm_weights(pt_model.lstm.weight_ih_l0.detach().numpy(), axis=0).T
+    w_hh = reorder_lstm_weights(pt_model.lstm.weight_hh_l0.detach().numpy(), axis=0).T
+    b_total = reorder_lstm_weights(pt_model.lstm.bias_ih_l0.detach().numpy() + pt_model.lstm.bias_hh_l0.detach().numpy(), axis=0)
+    for i in range(emb_dim):
+        for j in range(4 * 32):
+            lstm1.weights_ih.set_val(i, j, float(w_ih[i, j]))
+    for i in range(32):
+        for j in range(4 * 32):
+            lstm1.weights_hh.set_val(i, j, float(w_hh[i, j]))
+            lstm1.biases.set_val(0, j, float(b_total[j]))
+
+    w2_ih = reorder_lstm_weights(pt_model.lstm.weight_ih_l1.detach().numpy(), axis=0).T
+    w2_hh = reorder_lstm_weights(pt_model.lstm.weight_hh_l1.detach().numpy(), axis=0).T
+    b2_total = reorder_lstm_weights(pt_model.lstm.bias_ih_l1.detach().numpy() + pt_model.lstm.bias_hh_l1.detach().numpy(), axis=0)
+    for i in range(32):
+        for j in range(4 * 32):
+            lstm2.weights_ih.set_val(i, j, float(w2_ih[i, j]))
+            lstm2.weights_hh.set_val(i, j, float(w2_hh[i, j]))
+            lstm2.biases.set_val(0, j, float(b2_total[j]))
+
+    kw3_w = pt_model.dense.weight.detach().numpy().T
+    kw3_b = pt_model.dense.bias.detach().numpy()
+    for i in range(32):
+        for j in range(1):
+            dense.weights.set_val(i, j, float(kw3_w[i, j]))
+    dense.biases.set_val(0, 0, float(kw3_b[0]))
 
     print("\n[ Rocket-Lib Evaluation ]")
     r_preds = []
