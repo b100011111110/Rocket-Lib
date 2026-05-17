@@ -12,13 +12,13 @@
 
 Most performance articles show you the final scoreboard and reverse-engineer a clean story from it. This one won't do that.
 
-Rocket-Lib is a custom C++14 neural engine built from scratch — Row-Major tensor storage, Adam optimizer from first principles, BCEWithLogits loss with a numerical stability trick, the whole thing. The pitch was simple: hand-written C++ should be faster than Python-wrapped TensorFlow on the same laptop CPU.
+Rocket-Lib is a custom C++14 neural engine built from scratch — Row-Major tensor storage, Adam optimizer from first principles, BCEWithLogits loss with a numerical stability trick, the whole thing. The pitch was simple: hand-written C++ should be faster than Python-wrapped PyTorch on the same laptop CPU.
 
 On simple models, the single-threaded version was holding its own at around **0.8 seconds per epoch**. Not dominant, but credible. The natural next step was adding threads.
 
 The result? **0.70 to 0.75 seconds per epoch.**
 
-A rounding error. On a 16-thread CPU, that's essentially nothing. Then on a complex model — multiple layer types, more depth, running for hundreds of epochs — Keras wasn't just ahead. Keras was **2 to 3x faster** than Rocket-Lib.
+A rounding error. On a 16-thread CPU, that's essentially nothing. Then on a complex model — multiple layer types, more depth, running for hundreds of epochs — PyTorch wasn't just ahead. PyTorch was **2 to 3x faster** than Rocket-Lib.
 
 A C++ engine losing badly to a Python framework on its own hardware. That's the crisis point — and the forcing function for understanding what was actually wrong.
 
@@ -55,7 +55,7 @@ The first version spawned fresh OS threads at the start of every forward pass an
 
 For small to medium layers, that spawn overhead **dominates** compute entirely. You're not parallelizing the work — you're parallelizing the waiting.
 
-But that still doesn't explain why complex models were slower than Keras. Larger matrices mean more work per thread, which should amortize the spawn cost. The real culprit was deeper — hiding inside the kernel itself.
+But that still doesn't explain why complex models were slower than PyTorch. Larger matrices mean more work per thread, which should amortize the spawn cost. The real culprit was deeper — hiding inside the kernel itself.
 
 ---
 
@@ -89,7 +89,7 @@ weights.data[k * weights.cols + j]
 
 As `k` increments, this jumps through memory **column by column** in a row-major layout. Each new `k` skips an entire row width. If `weights.cols` is 256, that's a **2 KB jump per iteration**. The hardware prefetcher can't predict it. Every access to `weights` is potentially a cold cache miss.
 
-On the i7-12650H, a cache hit costs roughly 4 clock cycles. A cache miss costs 200+. That's a 50× latency penalty, paid on the most-accessed operand, millions of times per layer. This is exactly why Keras was winning on complex models: its backend (backed by oneDNN) uses cache-aware kernels. The Python overhead was irrelevant. Kernel quality was the whole game.
+On the i7-12650H, a cache hit costs roughly 4 clock cycles. A cache miss costs 200+. That's a 50× latency penalty, paid on the most-accessed operand, millions of times per layer. This is exactly why PyTorch was winning on complex models: its backend uses cache-aware kernels. The Python overhead was irrelevant. Kernel quality was the whole game.
 
 ### The Fix: i-k-j Loop Reorder
 
@@ -130,7 +130,7 @@ Three sequential memory streams, one register scalar. The compiler, seeing linea
 
 The algorithm didn't change. The traversal order changed.
 
-Computation is cheap. Memory latency is the bottleneck. A cache-aware O(n³) GEMM beats a cache-oblivious one every time, regardless of how many threads you throw at the latter. When the complex multi-layer models were losing to Keras, they weren't losing because of bad math — they were losing because every layer was torching the cache on entry.
+Computation is cheap. Memory latency is the bottleneck. A cache-aware O(n³) GEMM beats a cache-oblivious one every time, regardless of how many threads you throw at the latter. When the complex multi-layer models were losing to PyTorch, they weren't losing because of bad math — they were losing because every layer was torching the cache on entry.
 
 Fix the kernel first. Then parallelize. Parallelizing a slow kernel gives you more cores doing slow things simultaneously.
 
@@ -408,15 +408,15 @@ In practice, the final accuracy numbers are stable across runs — the loss land
 
 ## The Benchmarks
 
-All measurements on Ubuntu 22.04, Intel Core i7-12650H, compiled with `-O3 -march=native -ffast-math`. Keras benchmarks use TensorFlow CPU backend with default flags. Both training runs are wall-clock timed with `time.time()` and printed at the end of each script. The full benchmark suite runs via `sh tests.sh`; the primary parity comparison runs via `sh run_comparison.sh`.
+All measurements on Ubuntu 22.04, Intel Core i7-12650H, compiled with `-O3 -march=native -ffast-math`. PyTorch benchmarks use default CPU flags. Both training runs are wall-clock timed with `time.time()` and printed at the end of each script. The full benchmark suite runs via `sh tests.sh`.
 
-The default epoch count in `compare_keras.py` is **500 epochs** — that's what the stress test numbers below reflect.
+The default epoch count in `compare_pytorch.py` is **500 epochs** — that's what the stress test numbers below reflect.
 
 ### Sequential Dense Forward Pass
 
 | Implementation    | Time      |
 |-------------------|-----------|
-| Keras (TF CPU)    | 3.1289 s  |
+| PyTorch           | 3.1289 s  |
 | Rocket-Lib        | 0.2789 s  |
 | **Speedup**       | **11.22×** |
 
@@ -426,7 +426,7 @@ Cache-aware GEMM eliminates the miss penalty. The persistent ThreadPool eliminat
 
 | Implementation    | Time      |
 |-------------------|-----------|
-| Keras (TF CPU)    | 3.3581 s  |
+| PyTorch           | 3.3581 s  |
 | Rocket-Lib        | 0.7873 s  |
 | **Speedup**       | **4.27×** |
 
@@ -436,27 +436,27 @@ The smaller gain relative to the dense case is expected. Branch-merge points for
 
 | Implementation    | Time      |
 |-------------------|-----------|
-| Keras (TF CPU)    | 9.7155 s  |
+| PyTorch           | 9.7155 s  |
 | Rocket-Lib        | 2.6683 s  |
 | **Speedup**       | **3.64×** |
 
-This is the model class where Keras was winning before the optimizations — same architecture, same hardware, the workload that had Keras running 2–3x faster. Now Rocket-Lib is on the right side of that gap.
+This is the model class where PyTorch was winning before the optimizations — same architecture, same hardware, the workload that had PyTorch running 2–3x faster. Now Rocket-Lib is on the right side of that gap.
 
 ### 500-Epoch Training Stress Test
 
 | Implementation    | Time      |
 |-------------------|-----------|
-| Keras (TF CPU)    | 122.73 s  |
+| PyTorch           | 122.73 s  |
 | Rocket-Lib        | 49.34 s   |
 | **Speedup**       | **~2.5×** |
 
-This is the default `compare_keras.py` run — 500 epochs, 10,000 samples, with Dropout and L2 regularization, timed end-to-end. The advantage holds across the full forward-backward-update cycle.
+This is the default `compare_pytorch.py` run — 500 epochs, 10,000 samples, with Dropout and L2 regularization, timed end-to-end. The advantage holds across the full forward-backward-update cycle.
 
 ### Convergence
 
 Speed only matters if accuracy holds:
 
-| Metric      | Rocket-Lib | Keras   |
+| Metric      | Rocket-Lib | PyTorch |
 |-------------|------------|---------|
 | BCE Loss    | 0.1125     | 0.1753  |
 | Accuracy    | 97.25%     | 96.55%  |
@@ -498,9 +498,9 @@ These are real. The benchmarks are also real. Engineering is the gap between the
 
 The arc of this project:
 
-**0.8s/epoch** single-threaded → **0.70–0.75s/epoch** with naive threads → Keras **2–3x ahead** on complex models → two focused architectural fixes → Rocket-Lib **3–11x ahead** across the board.
+**0.8s/epoch** single-threaded → **0.70–0.75s/epoch** with naive threads → PyTorch **2–3x ahead** on complex models → two focused architectural fixes → Rocket-Lib **3–11x ahead** across the board.
 
-Naive threads moved the needle by almost nothing. The reason wasn't threading — it was that the underlying kernel was cache-oblivious, and parallelizing a slow kernel gives you more cores doing slow things simultaneously. Keras's backend uses cache-aware kernels descended from decades of BLAS research. Matching that kernel quality, not the thread count, was what actually closed the gap.
+Naive threads moved the needle by almost nothing. The reason wasn't threading — it was that the underlying kernel was cache-oblivious, and parallelizing a slow kernel gives you more cores doing slow things simultaneously. PyTorch uses cache-aware kernels descended from decades of BLAS research. Matching that kernel quality, not the thread count, was what actually closed the gap.
 
 **Fix 1: Loop reordering.** Swapping j and k transforms random column-stride access into sequential row-stride access. Bias initialization is separated from accumulation, keeping the hot inner loop pure. The compiler, seeing sequential non-aliased streams under `-ffast-math`, generates AVX2 automatically. No intrinsics, no assembly — just a different traversal order that respects the memory hierarchy.
 

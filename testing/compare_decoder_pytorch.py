@@ -3,11 +3,17 @@ import sys
 import time
 import urllib.request
 import numpy as np
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-import tensorflow as tf
 
 sys.path.append('build')
 import rocket
+
+try:
+    import torch
+    import torch.nn as nn
+    import torch.optim as optim
+except ImportError:
+    print("Please install PyTorch: pip install torch")
+    sys.exit(1)
 
 def prepare_tinyshakespeare(seq_len=32, num_samples=2000):
     url = "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
@@ -22,16 +28,14 @@ def prepare_tinyshakespeare(seq_len=32, num_samples=2000):
 
     chars = sorted(list(set(text)))
     
-    # Pad vocab to reach 200 if necessary
     target_vocab = 200
     if len(chars) < target_vocab:
         for i in range(target_vocab - len(chars)):
-            chars.append(chr(1000 + i)) # dummy unused characters
+            chars.append(chr(1000 + i))
             
     vocab_size = len(chars)
     char_to_ix = {ch: i for i, ch in enumerate(chars)}
     
-    # We will just take the first N chunks of seq_len
     X_list = []
     Y_list = []
     
@@ -44,7 +48,6 @@ def prepare_tinyshakespeare(seq_len=32, num_samples=2000):
     return np.array(X_list), np.array(Y_list), vocab_size, chars
 
 def to_one_hot_sequence(X, vocab_size, seq_len):
-    # Shape: (samples, seq_len, vocab_size)
     num_samples = X.shape[0]
     out = np.zeros((num_samples, seq_len, vocab_size), dtype=np.float32)
     for i in range(num_samples):
@@ -69,31 +72,45 @@ def to_rocket(arr):
             tensors.append(t)
     return tensors
 
-def build_keras_model(vocab_size, seq_len, emb_dim=32, ff_dim=64, lr=0.005, num_heads=4):
-    inputs = tf.keras.Input(shape=(seq_len, vocab_size))
-    
-    # Simple embedding by projecting one-hot via dense layer or just using the one-hot as input to dense
-    x = tf.keras.layers.Dense(emb_dim)(inputs)
-    
-    # 2 Layers of Causal Transformer Decoder
-    for _ in range(2):
-        # Causal Attention
-        att_output = tf.keras.layers.MultiHeadAttention(num_heads=num_heads, key_dim=emb_dim // num_heads)(x, x, use_causal_mask=True)
-        add1 = tf.keras.layers.Add()([x, att_output])
-        norm1 = tf.keras.layers.LayerNormalization(epsilon=1e-5)(add1)
-        
-        # FFN
-        ff1 = tf.keras.layers.Dense(ff_dim, activation="relu")(norm1)
-        ff2 = tf.keras.layers.Dense(emb_dim)(ff1)
-        add2 = tf.keras.layers.Add()([norm1, ff2])
-        x = tf.keras.layers.LayerNormalization(epsilon=1e-5)(add2)
-        
-    outputs = tf.keras.layers.Dense(vocab_size, activation="softmax")(x)
-    
-    model = tf.keras.Model(inputs=inputs, outputs=outputs)
-    model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=lr),
-                  loss='categorical_crossentropy',
-                  metrics=['accuracy'])
+class CausalTransformerDecoderBlock(nn.Module):
+    def __init__(self, emb_dim, num_heads, ff_dim, seq_len):
+        super().__init__()
+        self.mha = nn.MultiheadAttention(embed_dim=emb_dim, num_heads=num_heads, dropout=0.0, batch_first=True)
+        self.norm1 = nn.LayerNorm(emb_dim, eps=1e-5)
+        self.ffn = nn.Sequential(
+            nn.Linear(emb_dim, ff_dim),
+            nn.ReLU(),
+            nn.Linear(ff_dim, emb_dim)
+        )
+        self.norm2 = nn.LayerNorm(emb_dim, eps=1e-5)
+        self.seq_len = seq_len
+
+    def forward(self, x):
+        mask = nn.Transformer.generate_square_subsequent_mask(x.size(1), device=x.device)
+        attn_out, _ = self.mha(x, x, x, attn_mask=mask, is_causal=True)
+        x = self.norm1(x + attn_out)
+        ffn_out = self.ffn(x)
+        x = self.norm2(x + ffn_out)
+        return x
+
+class PyTorchTransformerDecoder(nn.Module):
+    def __init__(self, vocab_size, emb_dim, num_heads, ff_dim, seq_len):
+        super().__init__()
+        self.proj = nn.Linear(vocab_size, emb_dim)
+        self.dec1 = CausalTransformerDecoderBlock(emb_dim, num_heads, ff_dim, seq_len)
+        self.dec2 = CausalTransformerDecoderBlock(emb_dim, num_heads, ff_dim, seq_len)
+        self.dense_out = nn.Linear(emb_dim, vocab_size)
+        self.softmax = nn.Softmax(dim=-1)
+
+    def forward(self, x):
+        x = self.proj(x)
+        x = self.dec1(x)
+        x = self.dec2(x)
+        out = self.softmax(self.dense_out(x))
+        return out
+
+def build_pytorch_model(vocab_size, seq_len, emb_dim=32, ff_dim=64, lr=0.005, num_heads=4):
+    model = PyTorchTransformerDecoder(vocab_size, emb_dim, num_heads, ff_dim, seq_len)
     return model
 
 def build_rocket_model(vocab_size, seq_len, emb_dim=32, ff_dim=64, lr=0.005, num_heads=4):
@@ -101,14 +118,11 @@ def build_rocket_model(vocab_size, seq_len, emb_dim=32, ff_dim=64, lr=0.005, num
     
     inp = rocket.InputLayer()
     
-    # Project one-hot to embedding
     emb_proj = rocket.DenseLayer(vocab_size, emb_dim)
     
-    # 2 Layers of Transformer Decoder
     dec1 = rocket.TransformerMHDecoderLayer(emb_dim, seq_len, ff_dim, num_heads)
     dec2 = rocket.TransformerMHDecoderLayer(emb_dim, seq_len, ff_dim, num_heads)
     
-    # Output projection to vocab
     dense_out = rocket.DenseLayer(emb_dim, vocab_size)
     act_out = rocket.ActivationLayer(rocket.Softmax())
     
@@ -123,25 +137,25 @@ def build_rocket_model(vocab_size, seq_len, emb_dim=32, ff_dim=64, lr=0.005, num
     model.compile(rocket.CCE(), rocket.Adam(lr=lr))
     return model
 
-def generate_text_keras(model, start_text, chars, char_to_ix, seq_len, num_generate=50):
+def generate_text_pytorch(model, start_text, chars, char_to_ix, seq_len, num_generate=50):
     text = start_text
     vocab_size = len(chars)
+    model.eval()
     for _ in range(num_generate):
-        # Prepare input
         input_seq = text[-seq_len:] if len(text) >= seq_len else text.rjust(seq_len)
         X_test = np.zeros((1, seq_len, vocab_size), dtype=np.float32)
         for i, ch in enumerate(input_seq):
             if ch in char_to_ix:
                 X_test[0, i, char_to_ix[ch]] = 1.0
             else:
-                X_test[0, i, 0] = 1.0 # fallback
+                X_test[0, i, 0] = 1.0
                 
-        pred = model.predict(X_test, verbose=0)[0] # (seq_len, vocab_size)
+        X_test_t = torch.tensor(X_test, dtype=torch.float32)
+        with torch.no_grad():
+            pred = model(X_test_t).numpy()[0]
         
-        # Get the prediction for the last character
         last_idx = seq_len - 1
         pred_class = np.argmax(pred[last_idx])
-        
         text += chars[pred_class]
     return text
 
@@ -149,19 +163,17 @@ def generate_text(model, start_text, chars, char_to_ix, seq_len, num_generate=50
     text = start_text
     vocab_size = len(chars)
     for _ in range(num_generate):
-        # Prepare input
         input_seq = text[-seq_len:] if len(text) >= seq_len else text.rjust(seq_len)
         X_test = np.zeros((1, seq_len, vocab_size), dtype=np.float32)
         for i, ch in enumerate(input_seq):
             if ch in char_to_ix:
                 X_test[0, i, char_to_ix[ch]] = 1.0
             else:
-                X_test[0, i, 0] = 1.0 # fallback
+                X_test[0, i, 0] = 1.0
                 
         X_rk = to_rocket(X_test)[0]
-        pred = model.predict([X_rk])[0] # (seq_len, vocab_size)
+        pred = model.predict([X_rk])[0]
         
-        # Get the prediction for the last character
         last_idx = seq_len - 1
         max_p = -1
         pred_class = 0
@@ -192,7 +204,6 @@ def main():
     X_np = to_one_hot_sequence(X_idx, vocab_size, seq_len)
     Y_np = to_one_hot_sequence(Y_idx, vocab_size, seq_len)
     
-    # Split
     split_idx = int(len(X_np) * 0.8)
     X_train_np = X_np[:split_idx]
     Y_train_np = Y_np[:split_idx]
@@ -205,15 +216,37 @@ def main():
     Y_test_rk = to_rocket(Y_test_np)
     
     print("\n==============================================")
-    print("       Training Keras Transformer Decoder")
+    print("      Training PyTorch Transformer Decoder")
     print("==============================================")
-    keras_model = build_keras_model(vocab_size, seq_len, emb_dim, ff_dim, lr=0.005)
+    pytorch_model = build_pytorch_model(vocab_size, seq_len, emb_dim, ff_dim, lr=0.005)
+    optimizer = optim.Adam(pytorch_model.parameters(), lr=0.005)
+    criterion = nn.CrossEntropyLoss()
     
-    k_start = time.time()
-    keras_model.fit(X_train_np, Y_train_np, epochs=epochs, batch_size=batch_size, validation_data=(X_test_np, Y_test_np), verbose=2)
-    k_end = time.time()
+    X_train_t = torch.tensor(X_train_np, dtype=torch.float32)
+    Y_train_t = torch.tensor(Y_train_np, dtype=torch.float32)
+    dataset = torch.utils.data.TensorDataset(X_train_t, Y_train_t)
+    loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
     
-    keras_loss, keras_acc = keras_model.evaluate(X_test_np, Y_test_np, verbose=0)
+    pt_start = time.time()
+    pytorch_model.train()
+    for epoch in range(epochs):
+        epoch_loss = 0.0
+        for batch_X, batch_y in loader:
+            optimizer.zero_grad()
+            out = pytorch_model(batch_X)
+            loss = criterion(out.view(-1, vocab_size), batch_y.view(-1, vocab_size))
+            loss.backward()
+            optimizer.step()
+            epoch_loss += loss.item()
+        print(f"Epoch {epoch+1}/{epochs} - loss: {epoch_loss/len(loader):.4f}")
+    pt_end = time.time()
+    
+    # PyTorch accuracy
+    pytorch_model.eval()
+    X_test_t = torch.tensor(X_test_np, dtype=torch.float32)
+    with torch.no_grad():
+        pt_preds = pytorch_model(X_test_t).numpy()
+    pt_acc = np.mean(np.argmax(pt_preds, axis=-1) == np.argmax(Y_test_np, axis=-1))
     
     print("\n==============================================")
     print("      Training Rocket Transformer Decoder")
@@ -224,7 +257,6 @@ def main():
     rocket_model.train(X_train_rk, Y_train_rk, X_test_rk, Y_test_rk, epochs, batch_size)
     r_end = time.time()
     
-    # Calculate rocket accuracy manually for comparison
     correct = 0
     total_chars = len(X_test_rk) * seq_len
     for i in range(len(X_test_rk)):
@@ -247,20 +279,20 @@ def main():
     print("\n==============================================")
     print("                COMPARISON")
     print("==============================================")
-    print(f"{'Metric':<20} | {'Keras':<15} | {'Rocket':<15}")
+    print(f"{'Metric':<20} | {'PyTorch':<15} | {'Rocket':<15}")
     print("-" * 55)
-    print(f"{'Test Accuracy':<20} | {keras_acc*100:13.2f}% | {rocket_acc*100:13.2f}%")
-    print(f"{'Training Time':<20} | {k_end - k_start:13.2f}s | {r_end - r_start:13.2f}s")
+    print(f"{'Test Accuracy':<20} | {pt_acc*100:13.2f}% | {rocket_acc*100:13.2f}%")
+    print(f"{'Training Time':<20} | {pt_end - pt_start:13.2f}s | {r_end - r_start:13.2f}s")
     print("==============================================\n")
     
     prompt = "First Citizen:"
     
     print("\n==============================================")
-    print("          TEXT GENERATION DEMO (Keras)")
+    print("          TEXT GENERATION DEMO (PyTorch)")
     print("==============================================")
     print(f"Prompt: '{prompt}'")
-    generated_keras = generate_text_keras(keras_model, prompt, chars, char_to_ix, seq_len, 100)
-    print(f"Generated text:\n{generated_keras}")
+    generated_pytorch = generate_text_pytorch(pytorch_model, prompt, chars, char_to_ix, seq_len, 100)
+    print(f"Generated text:\n{generated_pytorch}")
     print("==============================================\n")
     
     print("\n==============================================")

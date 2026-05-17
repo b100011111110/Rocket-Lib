@@ -3,15 +3,19 @@ import sys
 import time
 import numpy as np
 import pandas as pd
-import tensorflow as tf
-
-# Suppress TF logs
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 try:
     import rocket
 except ImportError:
     print("Error: Could not import 'rocket'. Make sure PYTHONPATH is set to the build directory.")
+    sys.exit(1)
+
+try:
+    import torch
+    import torch.nn as nn
+    import torch.optim as optim
+except ImportError:
+    print("Please install PyTorch: pip install torch")
     sys.exit(1)
 
 def load_and_preprocess_emotion(csv_path='samples/data/emotion.csv', max_samples=4000, seq_len=64, vocab_size=100):
@@ -58,47 +62,47 @@ def load_and_preprocess_emotion(csv_path='samples/data/emotion.csv', max_samples
     
     return X_train, Y_train, X_test, Y_test, char_to_ix, ix_to_char
 
-def convert_to_rocket_tensors(X, Y):
-    tensors = []
-    for i in range(len(X)):
-        # Reshape X to 2D (seq_len, vocab_size)
-        x_tensor = rocket.Tensor(X[i])
-        # Reshape Y to 2D (1, num_classes)
-        y_tensor = rocket.Tensor(Y[i].reshape(1, -1))
-        tensors.append((x_tensor, y_tensor))
-    return tensors
+class TransformerEncoderBlock(nn.Module):
+    def __init__(self, emb_dim, num_heads, ff_dim):
+        super().__init__()
+        self.mha = nn.MultiheadAttention(embed_dim=emb_dim, num_heads=num_heads, dropout=0.1, batch_first=True)
+        self.norm1 = nn.LayerNorm(emb_dim, eps=1e-5)
+        self.ffn = nn.Sequential(
+            nn.Linear(emb_dim, ff_dim),
+            nn.ReLU(),
+            nn.Linear(ff_dim, emb_dim)
+        )
+        self.norm2 = nn.LayerNorm(emb_dim, eps=1e-5)
+        self.dropout1 = nn.Dropout(0.1)
+        self.dropout2 = nn.Dropout(0.1)
 
-def build_keras_model(vocab_size, seq_len, num_classes=6, emb_dim=32, ff_dim=64, lr=0.001, num_heads=4):
-    inputs = tf.keras.Input(shape=(seq_len, vocab_size))
-    
-    # Project one-hot
-    x = tf.keras.layers.Dense(emb_dim)(inputs)
-    
-    # 2 Layers of Transformer Encoder (No Causal Mask)
-    for _ in range(2):
-        # Attention
-        att_output = tf.keras.layers.MultiHeadAttention(num_heads=num_heads, key_dim=emb_dim // num_heads)(x, x)
-        att_output = tf.keras.layers.Dropout(0.1)(att_output)
-        add1 = tf.keras.layers.Add()([x, att_output])
-        norm1 = tf.keras.layers.LayerNormalization(epsilon=1e-5)(add1)
-        
-        # FFN
-        ff1 = tf.keras.layers.Dense(ff_dim, activation="relu")(norm1)
-        ff2 = tf.keras.layers.Dense(emb_dim)(ff1)
-        ff2 = tf.keras.layers.Dropout(0.1)(ff2)
-        add2 = tf.keras.layers.Add()([norm1, ff2])
-        x = tf.keras.layers.LayerNormalization(epsilon=1e-5)(add2)
-        
-    # Global Average Pooling for classification
-    x = tf.keras.layers.GlobalAveragePooling1D()(x)
-    
-    # Output projection to classes
-    outputs = tf.keras.layers.Dense(num_classes, activation="softmax")(x)
-    
-    model = tf.keras.Model(inputs=inputs, outputs=outputs)
-    model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=lr),
-                  loss='categorical_crossentropy',
-                  metrics=['accuracy'])
+    def forward(self, x):
+        attn_out, _ = self.mha(x, x, x)
+        x = self.norm1(x + self.dropout1(attn_out))
+        ffn_out = self.ffn(x)
+        x = self.norm2(x + self.dropout2(ffn_out))
+        return x
+
+class PyTorchTransformerEncoder(nn.Module):
+    def __init__(self, vocab_size, emb_dim, num_heads, ff_dim, num_classes):
+        super().__init__()
+        self.proj = nn.Linear(vocab_size, emb_dim)
+        self.enc1 = TransformerEncoderBlock(emb_dim, num_heads, ff_dim)
+        self.enc2 = TransformerEncoderBlock(emb_dim, num_heads, ff_dim)
+        self.dense_out = nn.Linear(emb_dim, num_classes)
+        self.softmax = nn.Softmax(dim=-1)
+
+    def forward(self, x):
+        x = self.proj(x)
+        x = self.enc1(x)
+        x = self.enc2(x)
+        # Global average pooling
+        x = torch.mean(x, dim=1)
+        out = self.softmax(self.dense_out(x))
+        return out
+
+def build_pytorch_model(vocab_size, seq_len, num_classes=6, emb_dim=32, ff_dim=64, lr=0.005, num_heads=4):
+    model = PyTorchTransformerEncoder(vocab_size, emb_dim, num_heads, ff_dim, num_classes)
     return model
 
 def build_rocket_model(vocab_size, seq_len, num_classes=6, emb_dim=32, ff_dim=64, lr=0.001, num_heads=4):
@@ -113,8 +117,6 @@ def build_rocket_model(vocab_size, seq_len, num_classes=6, emb_dim=32, ff_dim=64
     enc1 = rocket.TransformerMHEncoderLayer(emb_dim, seq_len, ff_dim, num_heads, 0.1)
     enc2 = rocket.TransformerMHEncoderLayer(emb_dim, seq_len, ff_dim, num_heads, 0.1)
     
-    # Average pooling layer (since we don't have GlobalAveragePooling1D natively, we can use Flatten and then dense, or a simple sequence-to-vector layer)
-    # Actually we can just flatten the sequence output
     pool = rocket.GlobalAveragePooling1DLayer(seq_len, emb_dim)
     
     # Output projection to classes
@@ -130,7 +132,7 @@ def build_rocket_model(vocab_size, seq_len, num_classes=6, emb_dim=32, ff_dim=64
     model.add(act_out, [dense_out])
     
     model.setInputOutputLayers([inp], [act_out])
-    model.compile(rocket.CCE(), rocket.Adam(lr=lr, eps=1e-7))  # match Keras epsilon
+    model.compile(rocket.CCE(), rocket.Adam(lr=lr, eps=1e-7))
     return model
 
 def to_rocket(np_array):
@@ -141,12 +143,10 @@ def to_rocket(np_array):
     return tensors
 
 def evaluate_rocket(model, X_test_tensors, Y_test_np):
-    """Evaluate rocket model; X_test_tensors is list of Tensors, Y_test_np is numpy (N, num_classes)."""
     correct = 0
     total = len(X_test_tensors)
     for i in range(total):
         pred = model.predict([X_test_tensors[i]])[0]
-        # pred is a Tensor of shape (1, num_classes) — flatten to 1D
         pred_arr = np.array(pred).flatten()
         pred_idx = np.argmax(pred_arr)
         true_idx = np.argmax(Y_test_np[i])
@@ -154,8 +154,17 @@ def evaluate_rocket(model, X_test_tensors, Y_test_np):
             correct += 1
     return correct / total
 
+def evaluate_pytorch(model, X_test, Y_test):
+    model.eval()
+    X_test_t = torch.tensor(X_test, dtype=torch.float32)
+    with torch.no_grad():
+        preds = model(X_test_t).numpy()
+    pred_indices = np.argmax(preds, axis=-1)
+    true_indices = np.argmax(Y_test, axis=-1)
+    return np.mean(pred_indices == true_indices)
+
 def main():
-    seq_len = 32       # was 64 — halves O(n²) attention cost
+    seq_len = 32
     num_samples = 5000
     vocab_size = 100
     emb_dim = 32
@@ -169,13 +178,30 @@ def main():
         max_samples=num_samples, seq_len=seq_len, vocab_size=vocab_size)
     
     print("\n==============================================")
-    print("       Training Keras Transformer Encoder")
+    print("      Training PyTorch Transformer Encoder")
     print("==============================================")
-    keras_model = build_keras_model(vocab_size, seq_len, num_classes, emb_dim, ff_dim, lr=0.005, num_heads=num_heads)
+    pytorch_model = build_pytorch_model(vocab_size, seq_len, num_classes, emb_dim, ff_dim, lr=0.005, num_heads=num_heads)
+    optimizer = optim.Adam(pytorch_model.parameters(), lr=0.005)
+    criterion = nn.CrossEntropyLoss()
     
-    k_start = time.time()
-    keras_model.fit(X_train, Y_train, batch_size=batch_size, epochs=epochs, validation_data=(X_test, Y_test), verbose=2)
-    k_end = time.time()
+    X_train_t = torch.tensor(X_train, dtype=torch.float32)
+    Y_train_t = torch.tensor(Y_train, dtype=torch.float32)
+    dataset = torch.utils.data.TensorDataset(X_train_t, Y_train_t)
+    loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    
+    pt_start = time.time()
+    pytorch_model.train()
+    for epoch in range(epochs):
+        epoch_loss = 0.0
+        for batch_X, batch_y in loader:
+            optimizer.zero_grad()
+            out = pytorch_model(batch_X)
+            loss = criterion(out, batch_y)
+            loss.backward()
+            optimizer.step()
+            epoch_loss += loss.item()
+        print(f"Epoch {epoch+1}/{epochs} - loss: {epoch_loss/len(loader):.4f}")
+    pt_end = time.time()
     
     print("\n==============================================")
     print("      Training Rocket Transformer Encoder")
@@ -192,16 +218,16 @@ def main():
     r_end = time.time()
     
     # Evaluate
-    _, keras_acc = keras_model.evaluate(X_test, Y_test, verbose=0)
-    rocket_acc = evaluate_rocket(rocket_model, rocket_X_test, Y_test)  # use numpy Y_test
+    pytorch_acc = evaluate_pytorch(pytorch_model, X_test, Y_test)
+    rocket_acc = evaluate_rocket(rocket_model, rocket_X_test, Y_test)
     
     print("\n==============================================")
     print("                COMPARISON")
     print("==============================================")
-    print(f"{'Metric':<20} | {'Keras':<15} | {'Rocket':<15}")
+    print(f"{'Metric':<20} | {'PyTorch':<15} | {'Rocket':<15}")
     print("-" * 55)
-    print(f"{'Test Accuracy':<20} | {keras_acc*100:13.2f}% | {rocket_acc*100:13.2f}%")
-    print(f"{'Training Time':<20} | {k_end - k_start:13.2f}s | {r_end - r_start:13.2f}s")
+    print(f"{'Test Accuracy':<20} | {pytorch_acc*100:13.2f}% | {rocket_acc*100:13.2f}%")
+    print(f"{'Training Time':<20} | {pt_end - pt_start:13.2f}s | {r_end - r_start:13.2f}s")
     print("==============================================\n")
 
 if __name__ == "__main__":

@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.14)
 project(RocketLib)
 
+set(PYTHON_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../python_headers" CACHE PATH "" FORCE)
+set(Python3_INCLUDE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/../python_headers" CACHE PATH "" FORCE)
+set(Python_INCLUDE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/../python_headers" CACHE PATH "" FORCE)
+include_directories("${CMAKE_CURRENT_SOURCE_DIR}/../python_headers")
+
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
@@ -12,7 +17,7 @@ include(FetchContent)
 FetchContent_Declare(
   pybind11
   GIT_REPOSITORY https://github.com/pybind/pybind11.git
-  GIT_TAG        v2.10.4
+  GIT_TAG        v2.12.0
 )
 FetchContent_MakeAvailable(pybind11)
 
@@ -29,6 +34,7 @@ set_target_properties(rocket_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # Build the Python extension
 pybind11_add_module(rocket src/rocket.cpp)
+target_include_directories(rocket PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../python_headers")
 target_link_libraries(rocket PRIVATE rocket_core)
 
 

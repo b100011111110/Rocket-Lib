@@ -4,3 +4,5 @@ venv/
 *.zip
 readme
 SMSSpamCollection
+__pycache__/
+python_headers/

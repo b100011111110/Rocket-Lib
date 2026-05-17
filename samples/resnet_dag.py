@@ -80,27 +80,52 @@ def main():
     model.train(x_train, y_train, x_train, y_train, epochs=50, batch_size=32)
     time_rocket = time.time() - start_rocket
 
-    # 6. Benchmark Keras
-    time_keras = None
+    # 6. Benchmark PyTorch
+    time_pytorch = None
     try:
-        import tensorflow as tf
-        print("\n[2/2] Training Keras Equivalent (50 epochs)...")
-        inputs = tf.keras.Input(shape=(20,))
-        x = tf.keras.layers.Dense(64)(inputs)
-        x = tf.keras.layers.ReLU()(x)
-        path_a = tf.keras.layers.Dense(64)(x)
-        path_b = x
-        x = tf.keras.layers.Add()([path_a, path_b])
-        x = tf.keras.layers.ReLU()(x)
-        outputs = tf.keras.layers.Dense(1)(x)
-        k_model = tf.keras.Model(inputs, outputs)
-        k_model.compile(optimizer=tf.keras.optimizers.Adam(0.005), loss=tf.keras.losses.BinaryCrossentropy(from_logits=True))
+        import torch
+        import torch.nn as nn
+        import torch.optim as optim
+        print("\n[2/2] Training PyTorch Equivalent (50 epochs)...")
         
-        start_keras = time.time()
-        k_model.fit(X, y, epochs=50, batch_size=32, verbose=0)
-        time_keras = time.time() - start_keras
+        class PyTorchResNet(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.dense1 = nn.Linear(20, 64)
+                self.relu1 = nn.ReLU()
+                self.dense_res = nn.Linear(64, 64)
+                self.relu_sum = nn.ReLU()
+                self.dense_out = nn.Linear(64, 1)
+
+            def forward(self, x):
+                x1 = self.relu1(self.dense1(x))
+                path_a = self.dense_res(x1)
+                path_b = x1
+                x2 = self.relu_sum(path_a + path_b)
+                out = self.dense_out(x2)
+                return out
+
+        pt_model = PyTorchResNet()
+        optimizer = optim.Adam(pt_model.parameters(), lr=0.005)
+        criterion = nn.BCEWithLogitsLoss()
+        
+        X_t = torch.tensor(X, dtype=torch.float32)
+        y_t = torch.tensor(y, dtype=torch.float32)
+        dataset = torch.utils.data.TensorDataset(X_t, y_t)
+        loader = torch.utils.data.DataLoader(dataset, batch_size=32, shuffle=True)
+        
+        start_pytorch = time.time()
+        pt_model.train()
+        for epoch in range(50):
+            for batch_X, batch_y in loader:
+                optimizer.zero_grad()
+                out = pt_model(batch_X)
+                loss = criterion(out, batch_y)
+                loss.backward()
+                optimizer.step()
+        time_pytorch = time.time() - start_pytorch
     except ImportError:
-        print("\nTensorFlow not found. Skipping benchmark.")
+        print("\nPyTorch not found. Skipping benchmark.")
 
     print("\n" + "="*35)
     print(" RESNET PERFORMANCE & ACCURACY")
@@ -116,13 +141,16 @@ def main():
     r_acc = np.mean((r_probs > 0.5) == y.flatten())
     print(f"Rocket Accuracy: {r_acc*100:.2f}%")
 
-    if time_keras:
-        print(f"Keras Time:  {time_keras:.4f}s")
-        k_probs = 1.0 / (1.0 + np.exp(-k_model.predict(X, verbose=0).flatten()))
-        k_acc = np.mean((k_probs > 0.5) == y.flatten())
-        print(f"Keras Accuracy:  {k_acc*100:.2f}%")
+    if time_pytorch:
+        print(f"PyTorch Time:  {time_pytorch:.4f}s")
+        pt_model.eval()
+        with torch.no_grad():
+            pt_preds = pt_model(X_t).flatten()
+            pt_probs = torch.sigmoid(pt_preds).numpy()
+        pt_acc = np.mean((pt_probs > 0.5) == y.flatten())
+        print(f"PyTorch Accuracy: {pt_acc*100:.2f}%")
         print("-" * 35)
-        print(f"Rocket is {time_keras/time_rocket:.2f}x faster!")
+        print(f"Rocket is {time_pytorch/time_rocket:.2f}x faster!")
     print("="*35)
 
 if __name__ == "__main__":

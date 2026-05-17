@@ -1,21 +1,26 @@
 import os
 import sys
 import numpy as np
-
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-import tensorflow as tf
+import time
 
 sys.path.append('build')
 import rocket
 
-# Disable Shuffle
+try:
+    import torch
+    import torch.nn as nn
+    import torch.optim as optim
+except ImportError:
+    print("Please install PyTorch: pip install torch")
+    sys.exit(1)
+
 os.environ['ROCKET_SHUFFLE'] = '0'
 os.environ['ROCKET_SEED'] = '42'
-tf.keras.utils.set_random_seed(42)
+torch.manual_seed(42)
+np.random.seed(42)
 
 def to_rocket(arr):
     tensors = []
-    # If arr is 3D (samples, seq_len, features)
     if len(arr.shape) == 3:
         for sample in arr:
             t = rocket.Tensor(sample.shape[0], sample.shape[1])
@@ -30,6 +35,16 @@ def to_rocket(arr):
                 t.set_val(0, i, float(val))
             tensors.append(t)
     return tensors
+
+class PyTorchRNN(nn.Module):
+    def __init__(self, input_dim, hidden_dim):
+        super().__init__()
+        self.rnn = nn.RNN(input_dim, hidden_dim, batch_first=True)
+        self.dense = nn.Linear(hidden_dim, 1)
+
+    def forward(self, x):
+        _, h = self.rnn(x)
+        return self.dense(h.squeeze(0))
 
 def test_rnn():
     print("\n--- Testing RNNLayer ---")
@@ -55,25 +70,46 @@ def test_rnn():
     r_model.setInputOutputLayers([inp], [dense])
     r_model.compile(rocket.MSE(), rocket.Adam(lr=0.01))
 
-    import time
     start_time = time.time()
     r_model.train(X_rocket, y_rocket, X_rocket, y_rocket, 100, batch_size)
     rocket_time = time.time() - start_time
     print(f"Rocket RNN Training Time: {rocket_time:.4f} seconds")
 
-    print("\nTraining Keras RNN for 100 epochs...")
-    k_model = tf.keras.Sequential([
-        tf.keras.layers.InputLayer(input_shape=(seq_len, input_dim)),
-        tf.keras.layers.SimpleRNN(hidden_dim, activation='tanh', return_sequences=False),
-        tf.keras.layers.Dense(1)
-    ])
-    k_model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.01), loss='mse')
+    print("\nTraining PyTorch RNN for 100 epochs...")
+    pt_model = PyTorchRNN(input_dim, hidden_dim)
+    optimizer = optim.Adam(pt_model.parameters(), lr=0.01)
+    criterion = nn.MSELoss()
     
+    X_t = torch.tensor(X, dtype=torch.float32)
+    y_t = torch.tensor(y, dtype=torch.float32)
+    dataset = torch.utils.data.TensorDataset(X_t, y_t)
+    loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=False)
+
     start_time = time.time()
-    k_model.fit(X, y, epochs=100, batch_size=batch_size, verbose=0)
-    keras_time = time.time() - start_time
-    print(f"Keras RNN Training Time:  {keras_time:.4f} seconds")
-    print(f"Speedup vs Keras:         {keras_time / rocket_time:.2f}x\n")
+    pt_model.train()
+    for epoch in range(100):
+        for batch_X, batch_y in loader:
+            optimizer.zero_grad()
+            out = pt_model(batch_X)
+            loss = criterion(out, batch_y)
+            loss.backward()
+            optimizer.step()
+    pytorch_time = time.time() - start_time
+    print(f"PyTorch RNN Training Time:  {pytorch_time:.4f} seconds")
+    print(f"Speedup vs PyTorch:         {pytorch_time / rocket_time:.2f}x\n")
+
+class PyTorchLSTM(nn.Module):
+    def __init__(self, input_dim, hidden_dim):
+        super().__init__()
+        self.lstm1 = nn.LSTM(input_dim, hidden_dim, batch_first=True)
+        self.drop = nn.Dropout(0.2)
+        self.lstm2 = nn.LSTM(hidden_dim, hidden_dim, batch_first=True)
+
+    def forward(self, x):
+        x, _ = self.lstm1(x)
+        x = self.drop(x)
+        _, (h, _) = self.lstm2(x)
+        return h.squeeze(0)
 
 def test_lstm():
     print("\n--- Testing LSTMLayer (Stacked) ---")
@@ -101,26 +137,33 @@ def test_lstm():
     r_model.setInputOutputLayers([inp], [lstm2])
     r_model.compile(rocket.MSE(), rocket.Adam(lr=0.01))
 
-    import time
     start_time = time.time()
     r_model.train(X_rocket, y_rocket, X_rocket, y_rocket, 100, batch_size)
     rocket_time = time.time() - start_time
     print(f"Rocket Pure Stacked LSTM Training Time: {rocket_time:.4f} seconds")
 
-    print("\nTraining Keras Pure Stacked LSTM for 100 epochs...")
-    k_model = tf.keras.Sequential([
-        tf.keras.layers.InputLayer(shape=(seq_len, input_dim)),
-        tf.keras.layers.LSTM(hidden_dim, return_sequences=True),
-        tf.keras.layers.Dropout(0.2),
-        tf.keras.layers.LSTM(hidden_dim, return_sequences=False)
-    ])
-    k_model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.01), loss='mse')
+    print("\nTraining PyTorch Pure Stacked LSTM for 100 epochs...")
+    pt_model = PyTorchLSTM(input_dim, hidden_dim)
+    optimizer = optim.Adam(pt_model.parameters(), lr=0.01)
+    criterion = nn.MSELoss()
     
+    X_t = torch.tensor(X, dtype=torch.float32)
+    y_t = torch.tensor(y, dtype=torch.float32)
+    dataset = torch.utils.data.TensorDataset(X_t, y_t)
+    loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=False)
+
     start_time = time.time()
-    k_model.fit(X, y, epochs=100, batch_size=batch_size, verbose=0)
-    keras_time = time.time() - start_time
-    print(f"Keras Pure Stacked LSTM Training Time:  {keras_time:.4f} seconds")
-    print(f"Speedup vs Keras:                      {keras_time / rocket_time:.2f}x\n")
+    pt_model.train()
+    for epoch in range(100):
+        for batch_X, batch_y in loader:
+            optimizer.zero_grad()
+            out = pt_model(batch_X)
+            loss = criterion(out, batch_y)
+            loss.backward()
+            optimizer.step()
+    pytorch_time = time.time() - start_time
+    print(f"PyTorch Pure Stacked LSTM Training Time:  {pytorch_time:.4f} seconds")
+    print(f"Speedup vs PyTorch:                      {pytorch_time / rocket_time:.2f}x\n")
 
 if __name__ == "__main__":
     test_rnn()

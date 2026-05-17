@@ -13,7 +13,7 @@
 *   **⚡ Cache-Optimized Engine:** Utilizes **i-k-j loop reordering** for matrix operations, transforming random column-stride access into sequential row-stride scans. This maximizes L1/L2 cache hits and triggers automatic AVX2 vectorization.
 *   **🧶 Intelligent Multithreading:** Powered by a persistent **Singleton ThreadPool**. Execution is governed by a **FLOP-count heuristic** (e.g., 100k FLOP threshold), ensuring parallelism only happens when compute outweighs synchronization overhead.
 *   **🗺️ Modular DAG Architecture:** Define complex topologies (like ResNet skip connections) using a flexible graph engine. The library automatically resolves execution order via Kahn's Topological Sort.
-*   **🧪 Mathematical Parity:** Engineered for bit-perfect convergence with Keras/TensorFlow. Includes numerically stable `BCEWithLogits` (Log-Sum-Exp trick) and a production-grade **Adam** optimizer.
+*   **🧪 Mathematical Parity:** Engineered for bit-perfect convergence with PyTorch. Includes numerically stable `BCEWithLogits` (Log-Sum-Exp trick) and a production-grade **Adam** optimizer.
 *   **🐍 Python-C++ Interop:** High-performance bindings via `pybind11` provide a zero-copy interface, allowing NumPy-to-Tensor conversion and seamless model training from Python.
 
 ---
@@ -23,7 +23,7 @@
 Rocket-Lib is designed to outperform general-purpose frameworks on CPU by focusing on memory hierarchy and minimized framework overhead.
 
 ### 500-Epoch Stress Test (10k Samples)
-| Metric | Rocket-Lib (Multi-Thread) | Keras (Reference) | Result |
+| Metric | Rocket-Lib (Multi-Thread) | PyTorch (Reference) | Result |
 | :--- | :--- | :--- | :--- |
 | **Training Time** | **49.34s** | 122.73s | **2.5x Faster** |
 | **Accuracy** | **97.25%** | 96.55% | ✅ Parity+ |
@@ -143,7 +143,7 @@ We maintain a strict parity suite to ensure mathematical correctness. To run tes
 ```bash
 sh tests.sh
 ```
-All changes to the core engine must maintain within 2% variance of the Keras reference implementation.
+All changes to the core engine must maintain within 2% variance of the PyTorch reference implementation.
 
 ---
 

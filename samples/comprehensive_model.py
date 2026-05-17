@@ -63,29 +63,57 @@ def main():
     model.train(x_train, y_train, x_train, y_train, epochs=50, batch_size=32)
     time_rocket = time.time() - start_rocket
 
-    # 7. Benchmark Keras
-    time_keras = None
+    # 7. Benchmark PyTorch
+    time_pytorch = None
     try:
-        import tensorflow as tf
-        print("\n[2/2] Training Keras Equivalent (50 epochs)...")
-        k_model = tf.keras.Sequential([
-            tf.keras.layers.Dense(128, input_shape=(20,), 
-                                  activity_regularizer=tf.keras.regularizers.L2(0.001)),
-            tf.keras.layers.ReLU(),
-            tf.keras.layers.Dropout(0.2),
-            tf.keras.layers.Dense(64),
-            tf.keras.layers.ReLU(),
-            tf.keras.layers.Dropout(0.1),
-            tf.keras.layers.Dense(1)
-        ])
-        k_model.compile(optimizer=tf.keras.optimizers.Adam(0.001), 
-                        loss=tf.keras.losses.BinaryCrossentropy(from_logits=True))
+        import torch
+        import torch.nn as nn
+        import torch.optim as optim
+        print("\n[2/2] Training PyTorch Equivalent (50 epochs)...")
         
-        start_keras = time.time()
-        k_model.fit(X, y, epochs=50, batch_size=32, verbose=0)
-        time_keras = time.time() - start_keras
+        class PyTorchComprehensive(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.dense1 = nn.Linear(20, 128)
+                self.relu1 = nn.ReLU()
+                self.drop1 = nn.Dropout(0.2)
+                self.dense2 = nn.Linear(128, 64)
+                self.relu2 = nn.ReLU()
+                self.drop2 = nn.Dropout(0.1)
+                self.dense_out = nn.Linear(64, 1)
+
+            def forward(self, x):
+                h1_relu = self.relu1(self.dense1(x))
+                x = self.drop1(h1_relu)
+                h2_relu = self.relu2(self.dense2(x))
+                x = self.drop2(h2_relu)
+                out = self.dense_out(x)
+                return out, h1_relu
+
+        pt_model = PyTorchComprehensive()
+        optimizer = optim.Adam(pt_model.parameters(), lr=0.001)
+        criterion = nn.BCEWithLogitsLoss()
+        
+        X_t = torch.tensor(X, dtype=torch.float32)
+        y_t = torch.tensor(y, dtype=torch.float32)
+        dataset = torch.utils.data.TensorDataset(X_t, y_t)
+        loader = torch.utils.data.DataLoader(dataset, batch_size=32, shuffle=True)
+        
+        start_pytorch = time.time()
+        pt_model.train()
+        for epoch in range(50):
+            for batch_X, batch_y in loader:
+                optimizer.zero_grad()
+                out, h1_relu = pt_model(batch_X)
+                loss = criterion(out, batch_y)
+                # Keras L2 Activity Regularization: lambda * sum(x^2)
+                reg_penalty = 0.001 * torch.mean(torch.sum(h1_relu ** 2, dim=1))
+                total_loss = loss + reg_penalty
+                total_loss.backward()
+                optimizer.step()
+        time_pytorch = time.time() - start_pytorch
     except ImportError:
-        print("\nTensorFlow not found. Skipping benchmark.")
+        print("\nPyTorch not found. Skipping benchmark.")
 
     # 8. Results Comparison
     print("\n" + "="*35)
@@ -102,13 +130,16 @@ def main():
     r_acc = np.mean((r_probs > 0.5) == y.flatten())
     print(f"Rocket Accuracy: {r_acc*100:.2f}%")
 
-    if time_keras:
-        print(f"Keras Time:  {time_keras:.4f}s")
-        k_probs = 1.0 / (1.0 + np.exp(-k_model.predict(X, verbose=0).flatten()))
-        k_acc = np.mean((k_probs > 0.5) == y.flatten())
-        print(f"Keras Accuracy:  {k_acc*100:.2f}%")
+    if time_pytorch:
+        print(f"PyTorch Time:  {time_pytorch:.4f}s")
+        pt_model.eval()
+        with torch.no_grad():
+            pt_preds, _ = pt_model(X_t)
+            pt_probs = torch.sigmoid(pt_preds.flatten()).numpy()
+        pt_acc = np.mean((pt_probs > 0.5) == y.flatten())
+        print(f"PyTorch Accuracy: {pt_acc*100:.2f}%")
         print("-" * 35)
-        print(f"Rocket is {time_keras/time_rocket:.2f}x faster!")
+        print(f"Rocket is {time_pytorch/time_rocket:.2f}x faster!")
     print("="*35)
 
 if __name__ == "__main__":

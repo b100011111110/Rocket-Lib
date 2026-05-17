@@ -3,11 +3,17 @@ import sys
 import time
 import string
 import numpy as np
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-import tensorflow as tf
 
 sys.path.append('build')
 import rocket
+
+try:
+    import torch
+    import torch.nn as nn
+    import torch.optim as optim
+except ImportError:
+    print("Please install PyTorch: pip install torch")
+    sys.exit(1)
 
 def load_spam_data(filepath, max_samples=1500):
     X_text = []
@@ -97,31 +103,45 @@ def build_rocket_model(emb_dim, seq_len, ff_dim, lr=0.001):
     model.compile(rocket.BCE(), rocket.Adam(lr=lr))
     return model
 
-def build_keras_model(emb_dim, seq_len, ff_dim, lr=0.001):
-    inputs = tf.keras.Input(shape=(seq_len, emb_dim))
-    
-    x = inputs
-    for _ in range(3):
-        # Attention
-        att_output = tf.keras.layers.MultiHeadAttention(num_heads=1, key_dim=emb_dim)(x, x)
-        add1 = tf.keras.layers.Add()([x, att_output])
-        norm1 = tf.keras.layers.LayerNormalization(epsilon=1e-5)(add1)
-        
-        # FFN
-        ff1 = tf.keras.layers.Dense(ff_dim, activation="relu")(norm1)
-        ff2 = tf.keras.layers.Dense(emb_dim)(ff1)
-        add2 = tf.keras.layers.Add()([norm1, ff2])
-        x = tf.keras.layers.LayerNormalization(epsilon=1e-5)(add2)
-        
-    # RNN pooling
-    x = tf.keras.layers.SimpleRNN(emb_dim, activation='tanh')(x)
-    
-    outputs = tf.keras.layers.Dense(1, activation="sigmoid")(x)
-    
-    model = tf.keras.Model(inputs=inputs, outputs=outputs)
-    model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=lr),
-                  loss='binary_crossentropy',
-                  metrics=['accuracy'])
+class SimpleTransformerEncoderBlock(nn.Module):
+    def __init__(self, emb_dim, ff_dim):
+        super().__init__()
+        self.mha = nn.MultiheadAttention(embed_dim=emb_dim, num_heads=1, dropout=0.0, batch_first=True)
+        self.norm1 = nn.LayerNorm(emb_dim, eps=1e-5)
+        self.ffn = nn.Sequential(
+            nn.Linear(emb_dim, ff_dim),
+            nn.ReLU(),
+            nn.Linear(ff_dim, emb_dim)
+        )
+        self.norm2 = nn.LayerNorm(emb_dim, eps=1e-5)
+
+    def forward(self, x):
+        attn_out, _ = self.mha(x, x, x)
+        x = self.norm1(x + attn_out)
+        ffn_out = self.ffn(x)
+        x = self.norm2(x + ffn_out)
+        return x
+
+class PyTorchTransformerSeq(nn.Module):
+    def __init__(self, emb_dim, ff_dim):
+        super().__init__()
+        self.enc1 = SimpleTransformerEncoderBlock(emb_dim, ff_dim)
+        self.enc2 = SimpleTransformerEncoderBlock(emb_dim, ff_dim)
+        self.enc3 = SimpleTransformerEncoderBlock(emb_dim, ff_dim)
+        self.rnn = nn.RNN(input_size=emb_dim, hidden_size=emb_dim, batch_first=True)
+        self.dense_out = nn.Linear(emb_dim, 1)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        x = self.enc1(x)
+        x = self.enc2(x)
+        x = self.enc3(x)
+        _, h = self.rnn(x)
+        out = self.sigmoid(self.dense_out(h.squeeze(0)))
+        return out
+
+def build_pytorch_model(emb_dim, seq_len, ff_dim, lr=0.001):
+    model = PyTorchTransformerSeq(emb_dim, ff_dim)
     return model
 
 def main():
@@ -147,15 +167,37 @@ def main():
     Y_test_rk = to_rocket(Y_test_np)
     
     print("\n==============================================")
-    print("       Training Keras Transformer Encoder")
+    print("      Training PyTorch Transformer Encoder")
     print("==============================================")
-    keras_model = build_keras_model(emb_dim, seq_len, ff_dim, lr=0.005)
+    pytorch_model = build_pytorch_model(emb_dim, seq_len, ff_dim, lr=0.005)
+    optimizer = optim.Adam(pytorch_model.parameters(), lr=0.005)
+    criterion = nn.BCELoss()
     
-    k_start = time.time()
-    keras_history = keras_model.fit(X_train_np, Y_train_np, epochs=epochs, batch_size=32, validation_data=(X_test_np, Y_test_np), verbose=2)
-    k_end = time.time()
+    X_train_t = torch.tensor(X_train_np, dtype=torch.float32)
+    Y_train_t = torch.tensor(Y_train_np, dtype=torch.float32)
+    dataset = torch.utils.data.TensorDataset(X_train_t, Y_train_t)
+    loader = torch.utils.data.DataLoader(dataset, batch_size=32, shuffle=True)
     
-    keras_loss, keras_acc = keras_model.evaluate(X_test_np, Y_test_np, verbose=0)
+    pt_start = time.time()
+    pytorch_model.train()
+    for epoch in range(epochs):
+        epoch_loss = 0.0
+        for batch_X, batch_y in loader:
+            optimizer.zero_grad()
+            out = pytorch_model(batch_X)
+            loss = criterion(out, batch_y)
+            loss.backward()
+            optimizer.step()
+            epoch_loss += loss.item()
+        if (epoch + 1) % 10 == 0:
+            print(f"Epoch {epoch+1}/{epochs} - loss: {epoch_loss/len(loader):.4f}")
+    pt_end = time.time()
+    
+    pytorch_model.eval()
+    X_test_t = torch.tensor(X_test_np, dtype=torch.float32)
+    with torch.no_grad():
+        pt_preds = pytorch_model(X_test_t).numpy()
+    pytorch_acc = np.mean((pt_preds > 0.5) == Y_test_np)
     
     print("\n==============================================")
     print("      Training Rocket Transformer Encoder")
@@ -166,7 +208,6 @@ def main():
     rocket_model.train(X_train_rk, Y_train_rk, X_test_rk, Y_test_rk, epochs, 32)
     r_end = time.time()
     
-    # Calculate rocket accuracy manually for comparison
     correct = 0
     total = len(X_test_rk)
     for i in range(total):
@@ -179,10 +220,10 @@ def main():
     print("\n==============================================")
     print("                COMPARISON")
     print("==============================================")
-    print(f"{'Metric':<20} | {'Keras':<15} | {'Rocket':<15}")
+    print(f"{'Metric':<20} | {'PyTorch':<15} | {'Rocket':<15}")
     print("-" * 55)
-    print(f"{'Test Accuracy':<20} | {keras_acc*100:13.2f}% | {rocket_acc*100:13.2f}%")
-    print(f"{'Training Time':<20} | {k_end - k_start:13.2f}s | {r_end - r_start:13.2f}s")
+    print(f"{'Test Accuracy':<20} | {pytorch_acc*100:13.2f}% | {rocket_acc*100:13.2f}%")
+    print(f"{'Training Time':<20} | {pt_end - pt_start:13.2f}s | {r_end - r_start:13.2f}s")
     print("==============================================\n")
     
 if __name__ == "__main__":

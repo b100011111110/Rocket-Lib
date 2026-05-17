@@ -63,7 +63,7 @@ For convenience, the provided scripts add this path automatically. When running 
 sh tests.sh
 ```
 
-**Keras parity comparison only**
+**PyTorch parity comparison only**
 
 ```bash
 sh run_comparison.sh
@@ -466,18 +466,25 @@ model.setInputOutputLayers([input_layer], [output])
 model.compile(rocket.BCEWithLogits(), rocket.Adam(lr=0.005))
 ```
 
-**Keras equivalent:**
+**PyTorch equivalent:**
 
 ```python
-inputs  = tf.keras.Input(shape=(20,))
-x       = tf.keras.layers.Dense(64)(inputs)
-x       = tf.keras.layers.ReLU()(x)
-path_a  = tf.keras.layers.Dense(64)(x)
-path_b  = x                               # identity
-x       = tf.keras.layers.Add()([path_a, path_b])
-x       = tf.keras.layers.ReLU()(x)
-outputs = tf.keras.layers.Dense(1)(x)
-model   = tf.keras.Model(inputs, outputs)
+class ResNetDAG(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.dense1 = nn.Linear(20, 64)
+        self.relu1 = nn.ReLU()
+        self.path_a = nn.Linear(64, 64)
+        self.relu_merge = nn.ReLU()
+        self.output = nn.Linear(64, 1)
+
+    def forward(self, x):
+        x = self.relu1(self.dense1(x))
+        path_a_out = self.path_a(x)
+        path_b_out = x  # identity
+        merged = self.relu_merge(path_a_out + path_b_out)
+        out = self.output(merged)
+        return out
 ```
 
 **Execution detail:** For single-predecessor nodes, Rocket-Lib takes a direct path and skips the summation allocation. For multi-predecessor nodes, it materializes a combined tensor. Without the move constructor (currently deleted), the single-predecessor path still performs a deep copy — this is the highest-priority outstanding fix.
@@ -608,20 +615,21 @@ for d in [drop1, drop2]:
 
 ---
 
-### Synchronizing Weights with Keras (for parity testing)
+### Synchronizing Weights with PyTorch (for parity testing)
 
 ```python
-def sync_weights(keras_dense_layers, rocket_dense_layers):
-    for k_layer, r_layer in zip(keras_dense_layers, rocket_dense_layers):
-        weights, biases = k_layer.get_weights()
-        for i in range(weights.shape[0]):
-            for j in range(weights.shape[1]):
-                r_layer.weights.set_val(i, j, float(weights[i, j]))
+def sync_weights(pytorch_dense_layers, rocket_dense_layers):
+    for pt_layer, r_layer in zip(pytorch_dense_layers, rocket_dense_layers):
+        weights = pt_layer.weight.detach().numpy()
+        biases = pt_layer.bias.detach().numpy()
+        for i in range(weights.shape[1]):
+            for j in range(weights.shape[0]):
+                r_layer.weights.set_val(i, j, float(weights[j, i]))
         for j in range(biases.shape[0]):
             r_layer.biases.set_val(0, j, float(biases[j]))
 ```
 
-Copying Keras-initialized weights into Rocket layers ensures both engines start from identical parameters — useful for gradient parity verification. See `testing/verify_parity.py` for a full example.
+Copying PyTorch-initialized weights into Rocket layers ensures both engines start from identical parameters — useful for gradient parity verification. See `testing/compare_pytorch.py` for a full example.
 
 ---
 

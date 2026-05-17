@@ -26,7 +26,7 @@ echo "\n[4/7] Running Comprehensive Model Benchmark..."
 python3 samples/comprehensive_model.py
 
 echo "\n[5/7] Running Full Parity & Metric Verification..."
-python3 testing/compare_keras.py
+python3 testing/compare_pytorch.py
 
 echo "\n[6/7] Verifying API Features & Serialization..."
 python3 testing/feature_test.py
@@ -40,14 +40,17 @@ echo "   Stacked LSTM Spam Correctness (Acc/Prec/Rec/F1)  "
 echo "----------------------------------------------------"
 python3 samples/spam_benchmark.py
 
-echo "\n[8/8] Running Transformer Encoder Keras Comparison..."
+echo "\n[8/8] Running Transformer PyTorch Comparison..."
 # Ensure dataset is present before running
 mkdir -p samples/data
 if [ ! -f samples/data/sms.tsv ]; then
     echo "Downloading SMS Spam Collection Dataset..."
     curl -sSL https://raw.githubusercontent.com/justmarkham/pycon-2016-tutorial/master/data/sms.tsv -o samples/data/sms.tsv
 fi
-python3 testing/compare_transformer_keras.py
+python3 testing/compare_transformer_pytorch.py
+python3 testing/compare_encoder_pytorch.py
+python3 testing/compare_decoder_pytorch.py
+python3 testing/pytorch_reg.py
 
 echo "\n===================================================="
 echo "          ALL TESTS COMPLETED SUCCESSFULLY          "
