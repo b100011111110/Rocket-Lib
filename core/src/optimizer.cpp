@@ -1,8 +1,8 @@
 #include "optimizer.h"
 #include "threadpool.h"
 #include <future>
-#include <vector>
 #include <thread>
+#include <vector>
 
 SGD::SGD(scalar lr) : learning_rate(lr) {}
 
@@ -42,25 +42,31 @@ void Adam::update(Tensor &param, const Tensor &grad) {
   for (int t_idx = 0; t_idx < num_threads; ++t_idx) {
     int start = t_idx * chunk;
     int end = std::min(start + chunk, num_elements);
-    if (start >= end) break;
+    if (start >= end)
+      break;
 
-    futures.push_back(ThreadPool::getInstance().enqueue([this, &param, &grad, &m_t, &v_t, start, end, beta1_correction, beta2_correction]() {
-      for (int i = start; i < end; ++i) {
-        scalar g = grad.data[i];
-        // Only clip if strictly necessary, or use a faster clip
-        if (g > 10.0f) g = 10.0f;
-        else if (g < -10.0f) g = -10.0f;
+    futures.push_back(ThreadPool::getInstance().enqueue(
+        [this, &param, &grad, &m_t, &v_t, start, end, beta1_correction,
+         beta2_correction]() {
+          for (int i = start; i < end; ++i) {
+            scalar g = grad.data[i];
+            if (g > 10.0f)
+              g = 10.0f;
+            else if (g < -10.0f)
+              g = -10.0f;
 
-        m_t.data[i] = beta1 * m_t.data[i] + (1.0f - beta1) * g;
-        v_t.data[i] = beta2 * v_t.data[i] + (1.0f - beta2) * g * g;
+            m_t.data[i] = beta1 * m_t.data[i] + (1.0f - beta1) * g;
+            v_t.data[i] = beta2 * v_t.data[i] + (1.0f - beta2) * g * g;
 
-        scalar m_hat = m_t.data[i] / beta1_correction;
-        scalar v_hat = v_t.data[i] / beta2_correction;
-        param.data[i] -= learning_rate * m_hat / (std::sqrt(v_hat) + epsilon);
-      }
-    }));
+            scalar m_hat = m_t.data[i] / beta1_correction;
+            scalar v_hat = v_t.data[i] / beta2_correction;
+            param.data[i] -=
+                learning_rate * m_hat / (std::sqrt(v_hat) + epsilon);
+          }
+        }));
   }
-  for (auto &f : futures) f.wait();
+  for (auto &f : futures)
+    f.wait();
 }
 
 RMSprop::RMSprop(scalar lr, scalar rho, scalar eps)
@@ -77,7 +83,8 @@ void RMSprop::update(Tensor &param, const Tensor &grad) {
   Tensor &v_t = v[param.id];
 
   for (int i = 0; i < param.rows * param.cols; ++i) {
-    v_t.data[i] = rho * v_t.data[i] + (1.0f - rho) * grad.data[i] * grad.data[i];
+    v_t.data[i] =
+        rho * v_t.data[i] + (1.0f - rho) * grad.data[i] * grad.data[i];
     param.data[i] -=
         learning_rate * grad.data[i] / (std::sqrt(v_t.data[i]) + epsilon);
   }

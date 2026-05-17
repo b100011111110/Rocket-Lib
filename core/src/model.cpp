@@ -222,7 +222,9 @@ void Model::train(const std::vector<Tensor> &xtrain,
             layer_grads[prev] += layer_grads[layer];
           }
         }
+      }
 
+      for (Layer *layer : topological_order) {
         layer->update(optimizer);
       }
     }

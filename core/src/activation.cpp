@@ -55,10 +55,19 @@ Tensor Tanh::backward(const Tensor &input, const Tensor &grad_output) {
   return grad_input;
 }
 
+inline scalar stable_sigmoid(scalar x) {
+  if (x >= 0.0f) {
+    return 1.0f / (1.0f + std::exp(-x));
+  } else {
+    scalar exp_x = std::exp(x);
+    return exp_x / (1.0f + exp_x);
+  }
+}
+
 Tensor Sigmoid::forward(const Tensor &input) {
   Tensor result(input.rows, input.cols);
   for (int i = 0; i < input.rows * input.cols; ++i) {
-    result.data[i] = 1.0f / (1.0f + std::exp(-input.data[i]));
+    result.data[i] = stable_sigmoid(input.data[i]);
   }
   return result;
 }
@@ -67,7 +76,7 @@ Tensor Sigmoid::backward(const Tensor &input, const Tensor &grad_output) {
   Tensor grad_input(input.rows, input.cols);
   const scalar epsilon = 1e-7f;
   for (int i = 0; i < input.rows * input.cols; ++i) {
-    scalar s = 1.0f / (1.0f + std::exp(-input.data[i]));
+    scalar s = stable_sigmoid(input.data[i]);
     s = std::max(epsilon, std::min(1.0f - epsilon, s));
     grad_input.data[i] = grad_output.data[i] * s * (1.0f - s);
   }
@@ -77,7 +86,14 @@ Tensor Sigmoid::backward(const Tensor &input, const Tensor &grad_output) {
 Tensor Softplus::forward(const Tensor &input) {
   Tensor result(input.rows, input.cols);
   for (int i = 0; i < input.rows * input.cols; ++i) {
-    result.data[i] = std::log(1.0 + std::exp(input.data[i]));
+    scalar x = input.data[i];
+    if (x > 20.0f) {
+      result.data[i] = x;
+    } else if (x < -20.0f) {
+      result.data[i] = 0.0f;
+    } else {
+      result.data[i] = std::log(1.0f + std::exp(x));
+    }
   }
   return result;
 }
@@ -85,7 +101,7 @@ Tensor Softplus::forward(const Tensor &input) {
 Tensor Softplus::backward(const Tensor &input, const Tensor &grad_output) {
   Tensor grad_input(input.rows, input.cols);
   for (int i = 0; i < input.rows * input.cols; ++i) {
-    scalar s = 1.0f / (1.0f + std::exp(-input.data[i]));
+    scalar s = stable_sigmoid(input.data[i]);
     grad_input.data[i] = grad_output.data[i] * s;
   }
   return grad_input;

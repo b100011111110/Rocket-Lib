@@ -107,7 +107,10 @@ PYBIND11_MODULE(rocket, m) {
       });
 
   // Bind Layers
-  py::class_<Layer, PyLayer>(m, "Layer").def(py::init<>());
+  py::class_<Layer, PyLayer>(m, "Layer")
+      .def(py::init<>())
+      .def_readwrite("output", &Layer::output)
+      .def_readwrite("grad_input", &Layer::grad_input);
 
   py::class_<InputLayer, Layer>(m, "InputLayer").def(py::init<>());
 

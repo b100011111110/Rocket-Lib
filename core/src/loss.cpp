@@ -144,7 +144,14 @@ Tensor BCEWithLogits::backward(const Tensor &logits, const Tensor &y_true) {
   int size = logits.rows * logits.cols;
   Tensor grad(logits.rows, logits.cols);
   for (int i = 0; i < size; ++i) {
-    scalar p = 1.0f / (1.0f + std::exp(-logits.data[i]));
+    scalar x = logits.data[i];
+    scalar p;
+    if (x >= 0.0f) {
+      p = 1.0f / (1.0f + std::exp(-x));
+    } else {
+      scalar exp_x = std::exp(x);
+      p = exp_x / (1.0f + exp_x);
+    }
     scalar t = y_true.data[i];
     grad.data[i] = (p - t) / size;
   }
